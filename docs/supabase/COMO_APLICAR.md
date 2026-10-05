@@ -121,6 +121,17 @@ posible; está explicado en P39.
 
 ---
 
+### Las pruebas que no son de SQL
+
+No necesitan Docker ni base: transpilan el archivo real y ejercitan sus funciones.
+
+```powershell
+pnpm test:fechas   # app/components/SelectorFechaHora.tsx  (31 comprobaciones)
+pnpm test:log      # app/admin/log/page.tsx                (19 comprobaciones)
+```
+
+---
+
 ## ⚠️ La trampa: producción ya tiene el baseline, pero no lo sabe
 
 El baseline **salió de producción**. Producción ya está en ese estado. Pero la

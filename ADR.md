@@ -441,3 +441,37 @@ Verificado antes de entregarlo, en un Postgres 16.13 con un escenario que reprod
 - La regla general: **antes de escribir una alarma, hay que saber decir en qué estado normal NO debe encenderse.** Si no se sabe, la alarma todavía no está diseñada.
 
 **Qué lo revertiría.** Que liquidar deje de ser un paso manual y ocurra dentro de la misma transacción que cierra. Entonces no habría ventana, el descuadre volvería a ser siempre anómalo y `descuadre_inexplicado` sería redundante. Hoy la ventana existe a propósito: entre cerrar y liquidar hay un humano mirando el resultado de la carrera.
+
+---
+
+## ADR-023 · El registro solo lee, y el texto que escribe el admin no es sintaxis
+
+**Fecha.** 05/10/2026
+
+**Contexto.** Jota: *«Hay que tener un log de transacciones URGENTE… vercel no lo crea? Quizás lo podamos consumir de ahí»*. Vercel no: registra peticiones HTTP e invocaciones de función, con retención corta, y no sabe nada de dinero.
+
+El registro ya existía, en tres tablas, con sus políticas de admin puestas desde el 29/09. Lo que faltaba era la pantalla. `admin_actions` en particular llevaba desde el principio guardando quién aprobó, quién rechazó, con qué motivo y si falló — **y no lo leía absolutamente nadie**. Una bitácora que nadie puede abrir no es una bitácora: es un coste de escritura.
+
+**Decisión 1: tres pestañas, no una línea de tiempo mezclada** (elegido por Jota). Cada fuente responde una pregunta distinta y se audita por separado: `wallet_movements` qué le pasó al dinero de un jugador, `house_ledger` qué le pasó al de la casa, `admin_actions` qué hizo un admin y si le salió bien.
+
+**Decisión 2: cero migraciones.** Las tres tablas tienen `grant select to authenticated` y una política `using (is_admin())`. Las claves foráneas para resolver los nombres también estaban. Añadir una RPC `security definer` para esto habría sido ampliar la superficie privilegiada sin ganar nada.
+
+**Decisión 3: la pantalla no calcula.** Lee y muestra. Es el ADR-015 llevado hasta el final: si aquí se sumara o se dedujera algo habría una segunda contabilidad escrita en TypeScript, que podría discrepar de la de la base — justo el defecto que este registro existe para poder detectar. Lo dice la propia pantalla al pie: *«si alguna vez discrepa de la contabilidad, el que tiene razón es el libro»*.
+
+**Lo que apareció escribiéndola: inyección de FILTRO.** El buscador construye el filtro así:
+
+```ts
+q.or(`descripcion.ilike.%${t}%,ref_externa.ilike.%${t}%`)
+```
+
+PostgREST lee **esa cadena como sintaxis**: la coma separa condiciones y los paréntesis agrupan. Un admin que busque `pago movil, 0412` parte el filtro en tres trozos; con paréntesis puede sustituirlo por otro. No es inyección de SQL —PostgREST no concatena SQL— pero el efecto práctico es el mismo y **en un registro de auditoría es el peor posible**: devuelve algo distinto de lo que se pidió, sin avisar, y quien lo mira se queda convencido de que no hay nada.
+
+De ahí `limpiarBusqueda`, que saca `, ( ) * " % \` antes de construir el filtro. El admin escribe palabras, no sintaxis.
+
+**Consecuencias.**
+- `tests/log.mjs` (`pnpm test:log`), con el mismo método que `tests/fechas.mjs`: transpila el archivo **real** y ejercita sus funciones, sin copias que se despeguen del original. 19 comprobaciones, incluida una que exige que **ningún** carácter de sintaxis sobreviva, y otra que mide que el rango de un día dure exactamente un día menos un milisegundo — dos días seguidos no pueden devolver la misma fila dos veces.
+- Las horas se pintan en la zona del navegador, como el resto de la aplicación, **y la pantalla dice cuál es**. En un registro de auditoría una hora sin zona no sirve de nada; cambiar la convención en una sola pantalla habría creado la inconsistencia que estamos evitando.
+- `max-w-3xl` en vez del `max-w-md` del resto del panel: fecha, actor, importe, descripción y referencia no caben en ancho de teléfono sin partir cada fila en cuatro líneas. Es la única pantalla que se sale, y se sale a propósito.
+- El CSV exporta **lo que está cargado en pantalla**, y el botón lo dice con el número de filas. Un CSV que promete "todo" y trae 50 filas es peor que no tenerlo.
+
+**Qué lo revertiría.** Que el volumen crezca hasta que paginar desde el cliente deje de servir — ahí haría falta una RPC con la consulta ya resuelta y un índice por fecha. Con dos dígitos de operaciones al día, todavía no.

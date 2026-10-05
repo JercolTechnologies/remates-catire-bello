@@ -153,6 +153,10 @@ export default function AdminHomePage() {
               Contabilidad
             </Link>
 
+            <Link href="/admin/log" className="rounded-xl bg-zinc-950/60 border border-zinc-800 px-3 py-2 text-sm">
+              Registro (movimientos, libro y acciones)
+            </Link>
+
             <Link href="/remates" className="rounded-xl bg-zinc-950/60 border border-zinc-800 px-3 py-2 text-sm">
               Ir a remates
             </Link>
