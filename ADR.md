@@ -475,3 +475,107 @@ De ahí `limpiarBusqueda`, que saca `, ( ) * " % \` antes de construir el filtro
 - El CSV exporta **lo que está cargado en pantalla**, y el botón lo dice con el número de filas. Un CSV que promete "todo" y trae 50 filas es peor que no tenerlo.
 
 **Qué lo revertiría.** Que el volumen crezca hasta que paginar desde el cliente deje de servir — ahí haría falta una RPC con la consulta ya resuelta y un índice por fecha. Con dos dígitos de operaciones al día, todavía no.
+
+---
+
+## ADR-024 · Una cadena se diagnostica eslabón por eslabón, y el eslabón barato primero
+
+**Fecha.** 05/10/2026 · **Cerrado**
+
+**Contexto.** Durante días el canal `admin:caja` parecía no funcionar: las recargas y los retiros solo aparecían recargando la página, mientras `remate:*` iba perfecto. Perseguí la causa por hipótesis —la política con `is_admin()`, los permisos del emisor, la retención de `realtime.messages`— y ninguna era.
+
+**Lo que lo resolvió fue partir la cadena en eslabones y medir cada uno por separado**, empezando por el más barato:
+
+| eslabón | cómo se midió | coste |
+|---|---|---|
+| ¿el disparador existe y está activo? | `pg_trigger.tgenabled` | una consulta |
+| ¿la política existe? | `pg_policy` sobre `realtime.messages` | la misma consulta |
+| ¿el oyente está autorizado? | `[realtime] admin:caja: SUBSCRIBED` en la consola | diez segundos |
+| ¿el emisor puede escribir? | `realtime.send(...)` llamado a mano | una consulta |
+| ¿la entrega llega al navegador? | esa emisión impresa en la consola | la misma prueba |
+| ¿el disparador real se dispara? | `update ... set estado = estado` | una consulta |
+
+El último dio `payload: {id: ..., estado: 'pendiente'}` en la consola del admin — exactamente lo que construye `tr_avisar_recarga`, no el payload de prueba. **El camino real funciona entero.**
+
+**La causa de lo observado.** Las solicitudes de prueba son del 30/09; la migración `20260930120000_realtime_senales` también. Los eventos que no llegaron no llegaron porque no había disparador todavía. El único evento de caja real en la tabla, un `retiro` del 02/10, sí se emitió solo.
+
+**La lección, que es de método y no de realtime.** Me costó tres turnos porque estuve proponiendo explicaciones en vez de cortar el problema. Una cadena de seis eslabones tiene seis sospechosos; una hipótesis descarta uno si aciertas y ninguno si fallas, mientras que medir un eslabón descarta uno **siempre**. Con seis eslabones y seis medidas baratas, el caso se cierra en una sesión.
+
+Y el corolario incómodo: **el `exception when others` de `_avisar` me escondió el eslabón del emisor durante todo ese tiempo.** Está bien que esté —una notificación perdida no puede tumbar una puja— pero significa que para diagnosticar hay que llamar a `realtime.send` **sin** el envoltorio. Eso ahora está escrito en `supabase/snippets/diagnostico_02oct.sql`. Un `raise warning` que nadie lee es un fallo silencioso con buena intención.
+
+**Lo que faltaba, medido ese mismo día.** Jota dejó `/admin/retiros` en una pestaña de atrás, creó dos solicitudes desde otra, y la lista no se movió. La consola:
+
+```
+[realtime] admin:caja: SUBSCRIBED
+[realtime] admin:caja <- retiro
+[realtime] admin:caja <- retiro
+[realtime] admin:caja: CLOSED
+```
+
+**Los dos eventos llegaron.** El séptimo eslabón —el que va del evento a la pantalla— era el único que quedaba, y era el roto. Ver ADR-025.
+
+---
+
+## ADR-025 · Una suscripción en tiempo real no es «suscribirse»
+
+**Fecha.** 05/10/2026
+
+**Contexto.** Con la cadena de realtime ya probada entera (ADR-024), los eventos llegaban al navegador y la pantalla seguía sin moverse. La consola lo dijo en cuatro líneas: `SUBSCRIBED`, dos `<- retiro`, y un `CLOSED` que **no pidió nadie**.
+
+Dos cosas que el navegador hace a propósito, y que la primera versión del hook ignoraba:
+
+1. **Una pestaña de atrás se congela.** Chrome estrangula los `setTimeout` de una pestaña oculta y, pasados unos minutos, la congela entera. El temporizador de 250 ms que agrupa las señales puede no dispararse nunca: el evento entra y la recarga no sale.
+2. **El socket se cierra.** Ese `CLOSED` lo cerró el navegador, y el hook no hacía nada con él. La pantalla se quedaba muda para siempre **con pinta de estar escuchando**.
+
+Lo segundo es lo grave. Es el mismo defecto que ADR-022 en otro disfraz: un instrumento que miente sobre su propio estado. El admin cree que está viendo la caja en vivo y está mirando una foto — y a diferencia de una alarma que grita de más, esta calla de más, que es la dirección peligrosa. Al otro lado hay un jugador esperando que le aprueben un retiro.
+
+**Decisión.** `useSenal` deja de ser una suscripción y pasa a ser una suscripción **supervisada**:
+
+- `CLOSED`, `CHANNEL_ERROR` y `TIMED_OUT` programan una reconexión con espera creciente y techo de 30 s. Insistir cada segundo no levanta un servicio caído y sí gasta batería y datos del admin.
+- Al reconectar **se recarga**, siempre. Los eventos perdidos no se reenvían: la única forma de ponerse al día es preguntar.
+- `visibilitychange` y `online` recargan y rehacen el canal. **No se comprueba antes si el canal seguía vivo**: comprobarlo exigiría leer un estado interno de la librería, y equivocarse ahí deja al admin mirando una foto. Una consulta de más no le cuesta nada a nadie; una solicitud de retiro que el admin no ve, sí.
+- Cada aviso comprueba que su canal **sigue siendo el vigente** (`if (canal !== c) return`). Sin eso, el `CLOSED` del canal viejo puede llegar después de haber abierto el nuevo, tirarlo, y repetir — una pantalla que se desconecta sola cada pocos segundos, que para quien la mira es lo mismo que no funcionar.
+- Una bandera `cerrandoAProposito` evita que nuestro propio `removeChannel` se interprete como una caída.
+
+**Consecuencias.**
+- Vale para los cuatro canales a la vez: las pujas y los remates usan el mismo hook. Ese `remate:*` que «funcionaba bien» tenía exactamente el mismo agujero; no se notaba porque esas pantallas se miran de frente, no se dejan de fondo.
+- La consola sigue registrando **todo** estado, no solo los fallos, y ahora también el motivo y la espera de cada reintento.
+- Lo que no se arregla aquí: un remate **nuevo** sigue sin avisar, porque `avisar_remate` es `after update on remates` y un alta es un INSERT. Es otro defecto, de la base, y necesita un canal de lista.
+
+**La regla.** Una suscripción en tiempo real no es «suscribirse». Es suscribirse, **darse cuenta de que se cayó**, volver a levantarla, y **recargar al volver**. Las tres últimas son el trabajo; la primera es la parte fácil, y es la única que estaba escrita.
+
+**Qué lo revertiría.** Que la librería del cliente garantice la reconexión y el relleno de huecos por su cuenta. Hoy reconecta el socket, pero el canal privado que se cayó no vuelve solo, y ningún evento perdido se reenvía.
+
+---
+
+## ADR-026 · El aviso vive en el panel, no dentro de la pantalla que avisa
+
+**Fecha.** 05/10/2026
+
+**Contexto.** Jota, después de dos turnos míos midiendo el realtime:
+
+> *«La idea es que cuando alguien solicite recarga o retiro, al admin le aparezca la notificación en tiempo real **sin importar la pantalla** de la app en la que esté, porque si el realtime funciona solamente dentro de /recargas - /retiros, entonces eso es prácticamente como que no existiera ningún realtime.»*
+
+Tenía razón, y el código lo confirma sin margen: de once pantallas de `/admin`, **exactamente dos** se suscribían a `admin:caja`, y eran las dos de gestión. `/admin` —el panel con los contadores de pendientes, que es donde un admin se queda esperando— no se suscribía a nada. Sus dos números se leían al montar la página y ahí se quedaban.
+
+**El error de método, que es mío.** Diseñé la prueba parándome dentro de `/admin/retiros`, que resulta ser el único sitio donde el mecanismo existía. La prueba pasaba y el producto seguía roto. Es el mismo defecto que ADR-022 y ADR-025 en una tercera cara: **un instrumento que mide donde no está el problema**. Y es peor que los otros dos, porque allí el instrumento mentía solo; aquí lo apunté yo.
+
+Jota recordaba que «creo recordar que se movía» estando en ese panel. Es muy posible y no es contradictorio: al **entrar** en `/admin` desde otra pantalla, el `load` del montaje vuelve a contar. Visto desde fuera parece que el número se actualizó solo.
+
+**Decisión.** Un `app/admin/layout.tsx` que envuelve todo `/admin/*` y monta `CajaEnVivo`:
+
+- **UNA sola suscripción a `admin:caja` por sesión de navegador**, no una por pantalla. Dos canales con el mismo tópico son dos uniones al mismo sitio: ruido en el servidor y dos fuentes de la misma verdad en el cliente.
+- Un layout de Next.js **no se vuelve a montar al navegar** entre las rutas que cubre, así que el canal sobrevive a los saltos: del panel a contabilidad y de ahí al registro sin reconectar el socket ni perder el aviso.
+- Los **contadores viven ahí**, y el panel los consume del contexto. No puede haber una barra diciendo 2 y un panel diciendo 0, porque es el mismo número. Contar también en la pantalla habría sido el ADR-015 en pequeño: dos implementaciones de lo mismo que acaban discrepando.
+- El contexto expone `version`, que sube con cada señal. Cualquier pantalla que quiera recargarse pone un efecto sobre `version`. Nadie vuelve a suscribir nada.
+- Barra fija arriba, visible desde cualquier pantalla del panel, con el número y el enlace. Se destaca en ámbar con un `NUEVO` durante seis segundos **solo cuando el número sube**, y nunca en la primera lectura: abrir el panel con tres pendientes de ayer no es una novedad.
+- En `/admin/login` no hace nada. No hay a quien avisar, y una consulta sin sesión solo llena la consola de errores.
+
+**Consecuencias.**
+- `/admin/recargas` y `/admin/retiros` dejan de suscribirse por su cuenta y reaccionan a `version`. Menos código y una sola fuente.
+- La reconexión y la recarga al volver al frente las sigue dando `useSenal` (ADR-025), ahora para todo el panel de una vez.
+- Lo que **no** cubre: si el admin cierra el navegador, no hay aviso. Eso es notificación fuera de la aplicación —correo, WhatsApp, Telegram— y sigue pendiente. Esta barra resuelve «estoy en la app pero en otra pantalla», que era el caso real.
+
+**La regla.** Un aviso que solo existe en la pantalla que lo muestra no es un aviso: es un detalle de esa pantalla. Si tiene que llegar «estés donde estés», vive por encima de las pantallas.
+
+**Qué lo revertiría.** Que el panel deje de ser una sola aplicación de cliente —por ejemplo, si la administración se partiera en aplicaciones separadas—. Entonces el canal volvería a necesitar un dueño por aplicación, no por pantalla.

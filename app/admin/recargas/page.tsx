@@ -2,7 +2,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useSenal, TOPICO_CAJA, EVENTOS_CAJA } from "@/lib/realtime"
+import { useCajaEnVivo } from "@/app/admin/CajaEnVivo"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
@@ -214,12 +214,21 @@ export default function AdminRecargasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
-  // EN VIVO. Una solicitud de recarga entra sola en la lista. Hasta hoy el
-  // admin solo se enteraba recargando la pagina, con el jugador esperando al
-  // otro lado y sin ningun aviso por correo. Canal privado: solo admins.
-  useSenal(TOPICO_CAJA, EVENTOS_CAJA, () => {
-    void load(true)
-  })
+  // EN VIVO, PERO NO DESDE AQUI (cambiado el 05/10/2026).
+  //
+  // Esta pantalla tenia su propio `useSenal(TOPICO_CAJA, ...)`, asi que la
+  // suscripcion nacia al abrirla y moria al salir: el aviso solo existia justo
+  // donde el admin ya estaba mirando. Ahora el canal vive en el layout de
+  // /admin (app/admin/CajaEnVivo.tsx) y cubre el panel entero; aqui basta con
+  // reaccionar a `version`, que sube con cada senal.
+  //
+  // `version > 0` evita una segunda consulta inutil al montar: el efecto de
+  // arriba ya cargo la lista.
+  const { version } = useCajaEnVivo()
+  useEffect(() => {
+    if (version > 0) void load(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version])
 
   // ---- filtered ----
   const filtered = useMemo(() => {

@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { useMotivos } from "@/lib/motivos"
-import { useSenal, TOPICO_CAJA, EVENTOS_CAJA } from "@/lib/realtime"
+import { useCajaEnVivo } from "@/app/admin/CajaEnVivo"
 
 /**
  * Tipos base (segun tu schema real)
@@ -173,11 +173,21 @@ export default function AdminRetirosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
-  // EN VIVO. Mismo canal que las recargas: los dos son movimientos de caja y
-  // los ve el mismo admin. Canal privado.
-  useSenal(TOPICO_CAJA, EVENTOS_CAJA, () => {
-    void load(true)
-  })
+  // EN VIVO, PERO NO DESDE AQUI (cambiado el 05/10/2026).
+  //
+  // Esta pantalla tenia su propio `useSenal(TOPICO_CAJA, ...)`, asi que la
+  // suscripcion nacia al abrirla y moria al salir: el aviso solo existia justo
+  // donde el admin ya estaba mirando. Ahora el canal vive en el layout de
+  // /admin (app/admin/CajaEnVivo.tsx) y cubre el panel entero; aqui basta con
+  // reaccionar a `version`, que sube con cada senal.
+  //
+  // `version > 0` evita una segunda consulta inutil al montar: el efecto de
+  // arriba ya cargo la lista.
+  const { version } = useCajaEnVivo()
+  useEffect(() => {
+    if (version > 0) void load(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version])
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
