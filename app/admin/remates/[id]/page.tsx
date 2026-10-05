@@ -612,6 +612,28 @@ export default function AdminRemateDetailPage() {
     }
 
     if (horses.length === 0) f.push("Al menos un caballo")
+
+    // NUMEROS REPETIDOS. `horses` tiene UNIQUE (race_id, numero), asi que esto
+    // lo rechaza la base de todas formas -- pero lo rechaza A MITAD del
+    // guardado, cuando la carrera y el remate ya se escribieron. El resultado
+    // era un remate ABIERTO, visible al publico, con cero caballos. Crear un
+    // remate son cuatro escrituras sin transaccion (pendiente 1.1), y mientras
+    // no haya un RPC transaccional, la unica defensa es no llegar nunca al
+    // insert que rebota.
+    //
+    // Se comparan los numeros YA NORMALIZADOS: "03" y "3" son el mismo caballo
+    // para la base, porque la columna es `integer`.
+    const vistos = new Map<number, number>()
+    for (const h of horses) {
+      const txt = h.numero.trim()
+      if (!txt) continue
+      const num = Number(txt)
+      if (!Number.isInteger(num)) continue
+      vistos.set(num, (vistos.get(num) ?? 0) + 1)
+    }
+    for (const [num, cuantos] of vistos) {
+      if (cuantos > 1) f.push(`El número ${num} está repetido en ${cuantos} caballos`)
+    }
     for (const h of horses) {
       const quien = h.numero.trim() ? `Caballo ${h.numero.trim()}` : "Un caballo"
       if (!h.numero.trim()) f.push("Número de un caballo")

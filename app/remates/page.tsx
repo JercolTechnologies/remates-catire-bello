@@ -7,6 +7,7 @@ import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import ClientBottomNav from "@/app/components/ClientBottomNav"
 import { CornerLogo } from "@/app/components/BrandLogo"
+import { useSenal, TOPICO_LISTA, EVENTOS_LISTA } from "@/lib/realtime"
 
 type RemateRow = {
   id: string
@@ -69,9 +70,20 @@ export default function RematesPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [authReady, setAuthReady] = useState(false)
 
+  // EN VIVO. Un remate nuevo entra solo en esta lista.
+  // Sube con cada senal del canal de la coleccion; el efecto de abajo depende
+  // de ella. Ver la migracion 20261005160000 y el ADR-026: el patron es el
+  // mismo que en el panel de admin -- la pantalla no se suscribe a nada, solo
+  // reacciona a un numero que cambia.
+  const [version, setVersion] = useState(0)
+  useSenal(TOPICO_LISTA, EVENTOS_LISTA, () => setVersion((v) => v + 1))
+
   useEffect(() => {
     const load = async () => {
-      setLoading(true)
+      // Solo la PRIMERA carga ensena "Cargando remates...". Una recarga
+      // disparada por una senal no puede dejar la pantalla en blanco: el
+      // usuario estaria mirando una lista y se le vaciaria sin tocar nada.
+      if (version === 0) setLoading(true)
       setError("")
 
       const { data: auth } = await supabase.auth.getUser()
@@ -138,7 +150,8 @@ export default function RematesPage() {
     }
 
     void load()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version])
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-zinc-50">Cargando remates...</div>

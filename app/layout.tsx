@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import AvisosDelUsuario from "./components/AvisosDelUsuario";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,6 +28,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        {/* Los avisos al usuario viven AQUI, por encima de todas las pantallas.
+            Un aviso que solo existe en la pantalla que lo muestra no es un
+            aviso (ADR-026). Sin sesion no pinta ni consulta nada. */}
+        <AvisosDelUsuario />
         <div className="min-h-screen flex flex-col">
           <div className="flex-1">{children}</div>
           <footer className="py-4 text-center text-xs text-zinc-400">

@@ -33,6 +33,23 @@ export function topicoRemate(remateId: string) {
 export const TOPICO_CAJA = "admin:caja"
 
 /**
+ * La COLECCION de remates, no un remate.
+ *
+ * Hace falta un canal aparte porque nadie puede suscribirse al canal de un
+ * remate que todavia no existe: `remate:<id>` sirve para seguir uno que ya
+ * tienes delante, no para enterarte de que apareció uno nuevo.
+ * Ver la migracion 20261005160000.
+ */
+export const TOPICO_LISTA = "remates:lista"
+export const EVENTOS_LISTA = ["lista"] as const
+
+/** El canal privado de un usuario: sus avisos. Migracion 20261005150000. */
+export function topicoUsuario(userId: string) {
+  return `usuario:${userId}`
+}
+export const EVENTOS_USUARIO = ["aviso"] as const
+
+/**
  * Escucha un canal y llama a `alRecibir` cuando llega cualquiera de `eventos`.
  *
  * - `topico` en null desactiva la suscripcion (util mientras no se sabe el id).

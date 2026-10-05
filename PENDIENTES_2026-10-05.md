@@ -1,11 +1,11 @@
 # Pendientes — al 5 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-01.md`, que se queda como histórico. Lo cerrado
-no se detalla aquí: está en `ADR.md` (28 decisiones) y en el arnés.
+no se detalla aquí: está en `ADR.md` (31 decisiones) y en el arnés.
 
-**Estado del proyecto:** 60/60 en `tests/pruebas_dinero.sql`, 4/4 en
+**Estado del proyecto:** 63/63 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 31 en `tests/fechas.mjs`, 32 en `tests/log.mjs`.
-32 migraciones aplicadas en producción.
+35 migraciones, 31 ADRs.
 
 ---
 
@@ -24,45 +24,41 @@ no se detalla aquí: está en `ADR.md` (28 decisiones) y en el arnés.
 | Nadie procesa su propia solicitud | ADR-028, P60 |
 | `CLAUDE.md` en el repo | **cierra el 6.1** |
 | Runbook de alta de licenciatario | `docs/supabase/INSTALACION_LICENCIATARIO.md` |
+| Números de caballo repetidos: el formulario ya no deja guardarlos | **tapa el agujero del 1.1** |
+| `/reglas` reescrita: lee de la base y describe el modelo real | ADR-029, P63 |
+| **Aviso al ganador** al liquidar, en vivo y al iniciar sesión | ADR-030, P61 |
+| **Canal de la colección**: un remate nuevo aparece solo | ADR-031, P62 |
 
 ---
 
 ## 1 · Lo que yo haría primero
 
-### 1.1 · `crear_remate_completo` transaccional — SIGUE ABIERTO desde el 01/10
-Crear un remate son **cuatro escrituras separadas** (`races`, `remates`,
-`horses`, `remate_price_rules`), sin transacción ni RPC.
+### 1.1 · `crear_remate_completo` transaccional — el agujero está tapado, la causa no
+Desde el 05/10 el formulario **no deja guardar dos caballos con el mismo
+número**, que era el único camino conocido que dejaba un remate abierto con
+cero caballos. Pero crear un remate siguen siendo **cuatro escrituras separadas**
+(`races`, `remates`, `horses`, `remate_price_rules`) sin transacción: cualquier
+otro fallo a mitad vuelve a dejar basura visible al público.
 
-El camino que falla hoy: `horses` tiene `UNIQUE (race_id, numero)` y el
-formulario **no valida números repetidos**. Dos caballos con el número 3 → la
-carrera y el remate se crean, el insert de caballos rebota con 23505, y queda un
-**remate `abierto` visible al público con cero caballos**.
-
-Dos arreglos, y el primero son minutos: validar repetidos en el formulario, y
-después el RPC transaccional.
+Lo que falta es el RPC transaccional. Ya no es urgente; sigue siendo correcto.
 
 *Aceptación:* forzar el fallo en el paso de reglas y comprobar que no queda
 ninguna carrera ni remate.
 
-### 1.2 · `/reglas` no explica la regla del 50%
-Comprobado el 05/10: esa página no la menciona. La base ya la aplica y el
-jugador se la encuentra **al intentar retirar**, que es el peor momento para
-enterarse. Jota: *«solo hay que explicarlo bien en las reglas y en los manuales
-del licenciatario»*.
+### 1.2 · Las notificaciones que faltan, que ahora son una línea cada una
+La tabla, el canal por usuario y el popup ya están (ADR-030). Quedan por
+enganchar, llamando a `_notificar` donde corresponde:
 
-Es texto, no código, y es lo que separa una regla de una reclamación.
+- recarga aprobada → en `aprobar_recarga`
+- recarga rechazada, **con su motivo** → en `rechazar_recarga`
+- retiro pagado o rechazado → en `procesar_retiro`
 
-### 1.3 · Aviso al ganador cuando se liquida un remate
-No existe. Pedido el 02/10: tiene que llegarle **tanto si está en línea como si
-inicia sesión después**. El canal de realtime ya está; lo que falta es el aviso
-persistente para el que no estaba mirando.
+Es la mitad del punto 3 de este documento, y la barata.
 
-### 1.4 · Remates nuevos no aparecen solos en la lista del cliente
-Causa localizada: `avisar_remate` es `after update on remates`, y **un alta es un
-INSERT**. Además nadie puede estar suscrito al canal de un remate que todavía no
-existe. Necesita un canal de lista (`remates:lista`) y su trigger. Es migración.
-
----
+### 1.3 · El `ClientBottomNav` pegado a mano en 6 pantallas
+Con 3 condiciones distintas; en `/remates` se oculta para admins. Cualquier
+pantalla nueva nace sin él. El patrón correcto ya existe dos veces en el repo:
+el layout de `/admin` (ADR-026) y el popup de avisos en el layout raíz.
 
 ## 2 · Dinero y operación
 

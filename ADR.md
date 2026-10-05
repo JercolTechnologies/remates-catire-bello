@@ -650,3 +650,83 @@ Dos consecuencias:
 No se arregla aquí porque la solución no es obvia. PostgreSQL no tiene transacciones autónomas; las salidas son `dblink` —descartado por ADR-020— o que el frontend, al capturar el error de la RPC, llame a una RPC aparte que registre el intento. Esa segunda transacción sí persiste, pero el dato lo aporta el cliente, así que sirve como ayuda de auditoría y no como control. **Es una decisión de Jota, no mía.**
 
 **Consecuencias.** `P60` mide las tres puertas y, sobre todo, que **otro** admin sí pueda: un candado que bloquea la operación normal se acaba quitando.
+
+---
+
+## ADR-029 · Las condiciones que acepta el jugador no se escriben en el HTML
+
+**Fecha.** 05/10/2026
+
+**Contexto.** Fui a añadir la regla del 50% a `/reglas` y me encontré con que esa página describía un modelo de dinero que la base había dejado de implementar. Comprobado contra las migraciones, punto por punto:
+
+| decía | la realidad, desde |
+|---|---|
+| «cada puja bloquea saldo» | **no.** 24/09, `puja_sin_bloqueo` |
+| «tu saldo no se libera hasta el cierre» | no hay nada que liberar |
+| «manual mínimo = auto mínimo + 10 Bs» | **no.** 23/09, `reglas_primera_puja` |
+| «la casa retiene 25%» | es `porcentaje_casa`, por remate |
+| «incrementos por rangos por defecto» | **no.** 30/09, escalera solo por caballo |
+| *(nada sobre la regla del 50%)* | **sí se aplica**, desde el 01/10 |
+
+Lo último era lo peor: la base aplicaba una condición que la página no mencionaba, así que el jugador se enteraba **al intentar retirar**. El peor momento posible para leer una condición.
+
+**La causa no fue descuido, fue el formato.** Un número escrito en el HTML no tiene forma de enterarse de que la base cambió. Cada migración que toca una regla deja esa página un poco más falsa, y nadie lo nota porque nada falla.
+
+**Decisión 1: los números se leen de la base.** `ajustes_publicos()` devuelve una **lista blanca** sobre `ajustes_instalacion`. Un licenciatario que ponga el porcentaje en 30 tiene esta página diciendo 30, sin tocar código.
+
+**Decisión 2: una lista blanca, no un `GRANT ... TO anon`.** `ajustes_instalacion` está cerrada a `anon` a propósito, y va a crecer: en el bloque de licencias le entran datos bancarios, SMTP y la marca. Abrir la tabla entera para que una página pública lea un porcentaje sería dejar la puerta abierta a todo lo que llegue después. Lo que no esté nombrado dentro de la función no sale, aunque alguien lo añada a la tabla mañana. **Es la diferencia entre una puerta y una ventanilla.**
+
+**Decisión 3: si no se puede leer, no se inventa.** Cuando `ajustes_publicos()` falla, el apartado afectado dice que no se pudo cargar y que pregunten antes de recargar. Una página de condiciones que rellena huecos con suposiciones es peor que una que admite que le falta un dato.
+
+**Consecuencias.** `P63` comprueba tres cosas: que responde **sin sesión** —las reglas se leen antes de abrir la cuenta—, que trae el porcentaje, y que **NO** devuelve una clave que no esté en la lista. Esa tercera existe para el día que alguien meta el SMTP en esa tabla: se pone en rojo antes de que la clave salga por la página pública.
+
+La página reescrita dice explícitamente lo que más se malentiende: **pujar no descuenta saldo**, el cobro es al cerrar y solo por lo que te quedaste, y al que pierde nunca se le quitó nada.
+
+---
+
+## ADR-030 · Un aviso que se emite y se pierde no es un aviso
+
+**Fecha.** 05/10/2026
+
+**Contexto.** Jota, liquidando un remate el 02/10: *«aquí tiene que salir un popup avisando al ganador, tanto si está en línea como si no estaba e inició sesión»*.
+
+Esas dos mitades deciden el diseño entero:
+
+- *«si está en línea»* → hace falta una señal en tiempo real.
+- *«si inició sesión»* → hace falta que el aviso **persista** y sepa si ya se leyó.
+
+**La segunda es la que manda.** Un toast que se emite y se pierde no sirve: el ganador puede estar durmiendo cuando se liquida su remate.
+
+**Decisión: una tabla de notificaciones, no un popup de premio.** La lista de pendientes ya tiene cuatro avisos más esperando —recarga aprobada, recarga rechazada con su motivo, retiro procesado, remate nuevo— y todos tienen exactamente esta forma: un usuario, un texto, una referencia, y si ya lo vio o no. Construir el del premio a medida y rehacerlo como notificaciones dentro de dos semanas es trabajo tirado dos veces. **Añadir cada uno de los otros es ahora una línea.**
+
+**Un canal privado por usuario**, `usuario:<uuid>`, con la política comparando el tópico contra `auth.uid()`. No hace falta confiar en el cliente: puede pedir suscribirse al canal de otro, y la base no le entrega nada.
+
+**La señal no lleva el texto.** Dice «tienes algo nuevo» y la pantalla vuelve a preguntar. ADR-015: si el mensaje viajara en el evento, viviría en dos sitios.
+
+**El popup va en el layout raíz**, no dentro de una pantalla — ADR-026 aplicado antes de volver a tropezar. Cubre la aplicación entera y sobrevive a la navegación. Sin sesión no consulta, no se suscribe y no pinta.
+
+**Un aviso perdido no puede tumbar una liquidación.** `_notificar` se traga sus propios errores, como `_avisar`. Y se lo puede permitir: cuando corre, el premio ya está en el saldo y en `wallet_movements`. **El registro de verdad es ese; esto es la cortesía de avisar.** Lo mismo al revés en la pantalla: si falla marcar como leído, el aviso se queda. Verlo dos veces es mejor que perderlo.
+
+**Consecuencias.** `P61` mide que liquidar con ganador usuario deja una fila sin leer con el importe del premio, que el perdedor no recibe nada, que **otro usuario no puede marcarla** y que el dueño sí.
+
+Su primera versión ponía `v_ajeno_no_marca := true` a mano, sin ejecutar nada. Eso no es una prueba, es una afirmación — y la habría entregado en verde.
+
+---
+
+## ADR-031 · Para enterarse de que algo apareció hace falta un canal de la colección
+
+**Fecha.** 05/10/2026
+
+**Contexto.** *«Los remates nuevos no le aparecen a los clientes a menos que actualice»*, reportado el 01/10. La causa inmediata es de una línea: `avisar_remate` es `after update on remates`, y **un alta es un INSERT**.
+
+Pero arreglar el trigger no habría servido, y eso es lo que importa: emite al canal `remate:<id>`, y **nadie puede estar suscrito al canal de un remate que todavía no existe**. No era un disparador mal puesto: faltaba el canal.
+
+**La regla general:** un canal por objeto sirve para **seguir** un objeto que ya tienes delante. Para enterarte de que **apareció** uno nuevo hace falta un canal de la colección. Son dos necesidades distintas y ninguna sustituye a la otra.
+
+**Decisión.** `remates:lista`, público —la lista de remates abiertos es la portada—, con **dos disparadores y una sola función** detrás.
+
+Dos y no uno porque la cláusula `WHEN` de un trigger no puede mirar `OLD` en un INSERT ni consultar `TG_OP`: «siempre al insertar, y al actualizar solo si cambió algo que se ve en la lista» no cabe en un disparador. Y el `WHEN` no es pulcritud: sin él, cada `closed_at` o cada marca interna despertaría a todos los navegadores conectados.
+
+**Consecuencias.** `P62` mide las tres cosas, y la tercera es la que impide que el arreglo sea peor que el problema: el alta emite, un cambio de estado emite, y **tocar una columna que la lista no muestra NO emite**.
+
+La pantalla pública recarga en silencio: solo la primera carga enseña «Cargando remates...». Una recarga disparada por una señal no puede dejar en blanco una lista que el usuario está mirando.

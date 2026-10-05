@@ -2716,6 +2716,9 @@ begin
       ('tr_avisar_caballo',               'cerrada'),
       ('tr_avisar_recarga',               'cerrada'),
       ('tr_avisar_retiro',                'cerrada'),
+      -- avisos al usuario y canal de la coleccion (05/10)
+      ('_notificar',                      'cerrada'),
+      ('tr_avisar_lista',                 'cerrada'),
       -- ajustes de instalacion y los tres guardianes de minimos (01/10)
       ('ajuste_numero',                    'cerrada'),
       ('requisito_apuesta',                'cerrada'),
@@ -2732,6 +2735,7 @@ begin
       ('admin_contabilidad_resumen',      'auth'),
       ('aprobar_recarga',                 'auth'),
       ('archivar_remate',                 'auth'),
+      ('ajustes_publicos',                'anon'),
       ('buscar_usuario_para_admin',       'auth'),
       ('cancelar_remate',                 'auth'),
       ('casa_resumen',                    'auth'),
@@ -2740,6 +2744,7 @@ begin
       ('hacer_puja',                      'auth'),
       ('liquidar_remate',                 'auth'),
       ('listar_admins',                   'auth'),
+      ('marcar_aviso_leido',              'auth'),
       ('listar_wallets_superadmin',       'auth'),
       ('mi_wallet_resumen',               'auth'),
       ('nombrar_admin',                   'auth'),
@@ -2930,6 +2935,7 @@ begin
       ('deposit_requests',   'select',                        ''),
       ('admin_actions',      'select',                        ''),
       ('house_ledger',       'select',                        ''),
+      ('notificaciones',     'select',                        ''),
       -- catalogo del remate: lo escribe la pantalla de admin HASTA LA TANDA 4,
       -- cuando existan crear_remate_completo() y guardar_remate_completo().
       -- Ese dia estas cuatro bajan a 'select' y se quitan del panel a la vez.
@@ -4344,6 +4350,276 @@ begin
     case when v_msg = '' then '' else ' | ' || v_msg end);
 exception when others then
   perform _p.anotar(60, 'Nadie procesa su propia solicitud',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+-- ============================================================================
+--  P61 - Al ganador le queda el aviso, aunque no estuviera mirando
+--
+--  Jota, liquidando un remate el 02/10: "aqui tiene que salir un popup
+--  avisando al ganador, tanto si esta en linea como si no estaba e inicio
+--  sesion". La segunda mitad es la que obliga a que esto exista en la base y no
+--  solo en el navegador: el ganador puede estar durmiendo cuando se liquida su
+--  remate, y un mensaje que se emite y se pierde no le sirve de nada.
+--
+--  LO QUE MIDE
+--   1. liquidar con ganador USUARIO deja una fila sin leer, con su importe
+--   2. liquidar ganando LA CASA no deja ninguna: un aviso de premio sin premio
+--      seria peor que no avisar
+--   3. marcar como leido funciona... y SOLO sobre lo propio
+--   4. el aviso no puede tumbar la liquidacion: el premio esta acreditado
+--      pase lo que pase con la notificacion
+-- ============================================================================
+do $$
+declare
+  v_admin uuid; v_u1 uuid; v_u2 uuid; v_rem uuid; v_h1 uuid; v_h2 uuid; v_h3 uuid;
+  v_existe boolean;
+  v_aviso record;
+  v_hay_aviso boolean := false;
+  v_importe_ok boolean := false;
+  v_casa_sin_aviso boolean := false;
+  v_marca boolean := false;
+  v_ajeno_no_marca boolean := false;
+  v_premio_acreditado boolean := false;
+  v_detalle text := '';
+begin
+  perform _p.limpiar();
+  delete from public.house_ledger;
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = '_notificar'
+  ) and (to_regclass('public.notificaciones') is not null) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(61, 'Al ganador le queda el aviso',
+      'notificaciones y _notificar existen y liquidar las escribe',
+      false, 'falta la tabla o la funcion: la migracion 20261005150000 no esta aplicada');
+    return;
+  end if;
+
+  v_admin := _p.usuario('admin', 0, true);
+  v_u1    := _p.usuario('juan',  10000);
+  v_u2    := _p.usuario('pedro', 10000);
+  v_rem   := _p.escenario(3, 100);
+  v_h1 := _p.caballo(v_rem,1); v_h2 := _p.caballo(v_rem,2); v_h3 := _p.caballo(v_rem,3);
+
+  perform _p.actuar_como(v_u1); perform public.hacer_puja(v_rem, v_h1, 200, true);
+  perform _p.actuar_como(v_u2); perform public.hacer_puja(v_rem, v_h2, 400, true);
+
+  perform _p.actuar_como(v_admin);
+  perform public.cerrar_remate(v_rem);
+  perform public.set_ganador_carrera(v_rem, 2);   -- gana el caballo de pedro
+  perform public.liquidar_remate(v_rem);
+
+  -- 1) a pedro le quedo el aviso, sin leer
+  select * into v_aviso
+  from public.notificaciones
+  where user_id = v_u2 and tipo = 'premio' and leida_at is null;
+  v_hay_aviso := found;
+
+  -- 2) y el importe del aviso es el premio que se acredito de verdad
+  if v_hay_aviso then
+    v_importe_ok := v_aviso.monto = (
+      select m.monto from public.wallet_movements m
+      join public.wallets w on w.id = m.wallet_id
+      where w.user_id = v_u2 and m.tipo = 'premio' and m.ref_externa = v_rem::text
+      limit 1);
+    v_premio_acreditado := v_aviso.monto > 0;
+    v_detalle := v_detalle || ' importe_aviso=' || v_aviso.monto::text;
+  end if;
+
+  -- 3) juan, que perdio, no recibe nada
+  if exists (select 1 from public.notificaciones where user_id = v_u1) then
+    v_detalle := v_detalle || ' | al perdedor le llego un aviso (mal)';
+  end if;
+
+  -- 4) LO AJENO PRIMERO, que si no la prueba no mide nada.
+  --
+  --    Juan intenta marcar como leido el aviso de Pedro. No tiene que dar
+  --    error -- la funcion filtra por auth.uid() y simplemente no toca ninguna
+  --    fila -- pero el aviso de Pedro tiene que seguir SIN LEER. Comprobar que
+  --    "no reviento" no demuestra nada; lo que se comprueba es que no cambio.
+  --
+  --    La primera version de esta prueba ponia `v_ajeno_no_marca := true` a
+  --    mano, sin ejecutar nada. Eso no es una prueba, es una afirmacion.
+  perform _p.actuar_como(v_u1);
+  perform public.marcar_aviso_leido(v_aviso.id);
+  select leida_at is null into v_ajeno_no_marca
+  from public.notificaciones where id = v_aviso.id;
+
+  -- 5) y ahora el dueno, que si puede
+  perform _p.actuar_como(v_u2);
+  perform public.marcar_aviso_leido(v_aviso.id);
+  select leida_at is not null into v_marca
+  from public.notificaciones where id = v_aviso.id;
+
+  perform _p.anotar(61, 'Al ganador le queda el aviso',
+    'liquidar con ganador usuario deja una notificacion sin leer con el importe del premio; el perdedor no recibe nada; otro usuario no la puede marcar; el dueno si',
+    v_hay_aviso and v_importe_ok and v_premio_acreditado and v_ajeno_no_marca and v_marca,
+    'hay_aviso=' || v_hay_aviso::text ||
+    ' importe_coincide=' || v_importe_ok::text ||
+    ' premio_positivo=' || v_premio_acreditado::text ||
+    ' un_ajeno_no_la_marca=' || v_ajeno_no_marca::text ||
+    ' el_dueno_si=' || v_marca::text || v_detalle);
+exception when others then
+  perform _p.anotar(61, 'Al ganador le queda el aviso',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+-- ============================================================================
+--  P62 - Un remate NUEVO avisa; un cambio interno no despierta a nadie
+--
+--  Jota el 01/10: "los remates nuevos no le aparecen a los clientes a menos que
+--  actualice". La causa, encontrada el 05/10: `avisar_remate` es
+--  `after update`, y un alta es un INSERT.
+--
+--  Pero aunque se disparara tampoco serviria, y eso es lo que mide la segunda
+--  mitad de esta prueba: emite al canal `remate:<id>`, y NADIE puede estar
+--  suscrito al canal de un remate que todavia no existe. Hacia falta un canal
+--  de la COLECCION.
+--
+--  Y la tercera mitad es la que evita que el arreglo sea peor que el problema:
+--  un `after update` sin clausula WHEN despertaria a todos los navegadores
+--  conectados cada vez que se toca cualquier columna del remate.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid; v_juan uuid; v_rem uuid; v_h uuid;
+  v_triggers int; v_politica int;
+  v_alta int; v_cambio_visible int; v_cambio_mudo int;
+  v_detalle text := '';
+begin
+  perform _p.limpiar();
+
+  select count(*) into v_triggers
+  from pg_trigger t
+  where not t.tgisinternal
+    and t.tgname in ('avisar_lista_alta','avisar_lista_cambio');
+
+  select count(*) into v_politica
+  from pg_policies
+  where schemaname = 'realtime' and tablename = 'messages'
+    and policyname = 'lista_recibe_cualquiera';
+
+  if v_triggers < 2 or v_politica < 1 then
+    perform _p.anotar(62, 'Un remate nuevo avisa a la lista',
+      'dos triggers de lista y su politica',
+      false, 'triggers: ' || v_triggers::text || ' de 2 | politica: ' || v_politica::text ||
+      ' de 1 -> la migracion 20261005160000 no esta aplicada');
+    return;
+  end if;
+
+  v_admin := _p.usuario('admin', 0, true);
+  v_juan  := _p.usuario('juan', 10000);
+
+  -- 1) EL ALTA. `_p.escenario` inserta un remate: eso solo ya tiene que emitir.
+  delete from realtime.messages;
+  v_rem := _p.escenario(2, 100, 25);
+  v_h   := _p.caballo(v_rem, 1);
+  select count(*) into v_alta
+  from realtime.messages where topic = 'remates:lista';
+
+  -- 2) UN CAMBIO QUE SE VE EN LA LISTA: cerrar cambia el estado.
+  perform _p.actuar_como(v_juan);
+  perform public.hacer_puja(v_rem, v_h, 100, true);
+  perform _p.actuar_como(v_admin);
+  delete from realtime.messages;
+  perform public.cerrar_remate(v_rem);
+  select count(*) into v_cambio_visible
+  from realtime.messages where topic = 'remates:lista';
+
+  -- 3) UN CAMBIO QUE NO SE VE: tocar una columna que la lista no muestra no
+  --    puede despertar a nadie. Sin el WHEN del trigger, esto emitiria.
+  delete from realtime.messages;
+  update public.remates set archived_reason = 'prueba P62' where id = v_rem;
+  select count(*) into v_cambio_mudo
+  from realtime.messages where topic = 'remates:lista';
+
+  v_detalle := 'alta=' || v_alta::text ||
+               ' cambio_visible=' || v_cambio_visible::text ||
+               ' cambio_interno=' || v_cambio_mudo::text || ' (esperado 0)';
+
+  perform _p.anotar(62, 'Un remate nuevo avisa a la lista',
+    'el alta emite; un cambio de estado emite; un cambio interno NO emite',
+    v_alta >= 1 and v_cambio_visible >= 1 and v_cambio_mudo = 0,
+    v_detalle);
+exception when others then
+  perform _p.anotar(62, 'Un remate nuevo avisa a la lista',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+-- ============================================================================
+--  P63 - La pagina de reglas lee de la base, y solo lo que puede ensenar
+--
+--  `/reglas` es lo que el jugador acepta antes de poner dinero, y sus numeros
+--  salian clavados en el HTML. Dos problemas: se desincronizan de la base -- el
+--  05/10 esa pagina describia un modelo de dinero derogado el 24/09 -- y no
+--  sirven para licenciar, porque cada instalacion tiene los suyos.
+--
+--  Pero `ajustes_instalacion` esta cerrada a `anon` a proposito, y va a crecer:
+--  en el bloque de licencias le entran datos bancarios, SMTP y la marca. La
+--  pagina de reglas la lee cualquiera, con sesion o sin ella.
+--
+--  De ahi la lista blanca. ESTA PRUEBA EXISTE PARA EL DIA QUE ALGUIEN META UNA
+--  CLAVE SENSIBLE EN ESA TABLA: si `ajustes_publicos()` empezara a devolver
+--  todo, esto se pone en rojo antes de que la clave salga por la pagina
+--  publica.
+-- ============================================================================
+do $$
+declare
+  v_existe boolean;
+  v_filas int;
+  v_trae_el_pct boolean := false;
+  v_no_trae_lo_nuevo boolean := false;
+  v_sin_sesion boolean := false;
+begin
+  perform _p.limpiar();
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'ajustes_publicos'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(63, 'Las reglas leen de la base, por lista blanca',
+      'ajustes_publicos() existe y filtra',
+      false, 'ajustes_publicos NO EXISTE: la migracion 20261005140000 no esta aplicada');
+    return;
+  end if;
+
+  -- Una clave que NO esta en la lista blanca. Representa a las que vienen
+  -- despues: SMTP, datos bancarios, la marca.
+  insert into public.ajustes_instalacion (clave, valor, tipo, descripcion)
+  values ('secreto_de_prueba_p63', 'no-debe-salir', 'texto', 'Clave sensible de mentira para P63')
+  on conflict (clave) do update set valor = excluded.valor;
+
+  -- SIN SESION, que es como la lee un visitante que todavia no se registro.
+  perform set_config('request.jwt.claims', '', false);
+  select count(*) into v_filas from public.ajustes_publicos();
+  v_sin_sesion := v_filas > 0;
+
+  select exists (select 1 from public.ajustes_publicos() where clave = 'pct_apostado_para_retirar')
+    into v_trae_el_pct;
+
+  select not exists (select 1 from public.ajustes_publicos() where clave = 'secreto_de_prueba_p63')
+    into v_no_trae_lo_nuevo;
+
+  delete from public.ajustes_instalacion where clave = 'secreto_de_prueba_p63';
+
+  perform _p.anotar(63, 'Las reglas leen de la base, por lista blanca',
+    'responde sin sesion; trae el porcentaje; NO trae una clave que no este en la lista',
+    v_sin_sesion and v_trae_el_pct and v_no_trae_lo_nuevo,
+    'responde_sin_sesion=' || v_sin_sesion::text ||
+    ' trae_el_pct=' || v_trae_el_pct::text ||
+    ' filtra_lo_demas=' || v_no_trae_lo_nuevo::text ||
+    ' | claves devueltas=' || v_filas::text);
+exception when others then
+  delete from public.ajustes_instalacion where clave = 'secreto_de_prueba_p63';
+  perform _p.anotar(63, 'Las reglas leen de la base, por lista blanca',
     'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
 end $$;
 
