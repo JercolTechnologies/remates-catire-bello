@@ -336,7 +336,10 @@ export default function AdminLogPage() {
   async function nombresDe(ids: string[]) {
     const unicos = Array.from(new Set(ids.filter(Boolean)))
     if (unicos.length === 0) return {} as Record<string, string>
-    const { data, error: e } = await supabase.from("profiles").select("id,username").in("id", unicos)
+    const { data, error: e } = await supabase
+      .from("profiles")
+      .select("id,username,admin_codigo,admin_nombre")
+      .in("id", unicos)
     if (e) {
       // Que falte un nombre no puede dejar al admin sin registro. Se sigue, y
       // las filas muestran el id.
@@ -344,7 +347,12 @@ export default function AdminLogPage() {
       return {} as Record<string, string>
     }
     const mapa: Record<string, string> = {}
-    for (const p of data ?? []) mapa[(p as any).id] = (p as any).username || "(sin nombre)"
+    for (const p of data ?? []) {
+      const r = p as any
+      // "C01 · Maria Perez" si tiene identidad de admin; si no, el usuario.
+      mapa[r.id] = [r.admin_codigo, r.admin_nombre || r.username].filter(Boolean).join(" · ")
+        || "(sin nombre)"
+    }
     return mapa
   }
 
@@ -445,7 +453,10 @@ export default function AdminLogPage() {
         } else {
           let q = supabase
             .from("admin_actions")
-            .select("id,admin_id,action,target_table,target_id,details,success,error,created_at")
+            .select(
+              "id,admin_id,action,target_table,target_id,details,success,error,created_at," +
+                "admin_codigo,admin_nombre"
+            )
             .order("created_at", { ascending: false })
             .range(from, to)
 
@@ -464,7 +475,18 @@ export default function AdminLogPage() {
             cuando: r.created_at,
             // admin_id quedo anulable el 23/09 para que el cierre automatico
             // -que no lo dispara nadie- pudiera auditarse igual.
-            quien: r.admin_id ? nombres[r.admin_id] || "(desconocido)" : "El sistema",
+            // LA FOTO MANDA SOBRE EL PERFIL ACTUAL.
+            // `admin_codigo`/`admin_nombre` guardan quien era esa persona EN EL
+            // MOMENTO. Si manana cambia de nombre, lo que hizo en marzo se
+            // sigue leyendo como se leia en marzo. Solo se cae a `profiles`
+            // para las filas anteriores a la migracion 20261005120000, que no
+            // tienen foto.
+            quien:
+              r.admin_codigo || r.admin_nombre
+                ? [r.admin_codigo, r.admin_nombre].filter(Boolean).join(" · ")
+                : r.admin_id
+                  ? nombres[r.admin_id] || "(desconocido)"
+                  : "El sistema",
             tipo: r.action,
             etiqueta: tituloDeAccion(r.action),
             monto: null,

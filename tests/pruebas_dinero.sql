@@ -2732,15 +2732,19 @@ begin
       ('admin_contabilidad_resumen',      'auth'),
       ('aprobar_recarga',                 'auth'),
       ('archivar_remate',                 'auth'),
+      ('buscar_usuario_para_admin',       'auth'),
       ('cancelar_remate',                 'auth'),
       ('casa_resumen',                    'auth'),
       ('cerrar_remate',                   'auth'),
       ('editar_remate',                   'auth'),
       ('hacer_puja',                      'auth'),
       ('liquidar_remate',                 'auth'),
+      ('listar_admins',                   'auth'),
       ('listar_wallets_superadmin',       'auth'),
       ('mi_wallet_resumen',               'auth'),
+      ('nombrar_admin',                   'auth'),
       ('procesar_retiro',                 'auth'),
+      ('quitar_admin',                    'auth'),
       ('rechazar_recarga',                'auth'),
       ('registrar_movimiento_casa',       'auth'),
       ('retirar_caballo',                 'auth'),
@@ -4070,6 +4074,276 @@ begin
     'fase1=' || v_fase1::text || ' fase2=' || v_fase2::text || ' fase3=' || v_fase3::text || v_detalle);
 exception when others then
   perform _p.anotar(58, 'El descuadre normal no alarma; el inexplicado si',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+-- ============================================================================
+--  P59 - Cada admin tiene nombre y codigo, y el codigo no se reutiliza
+--
+--  POR QUE EXISTE
+--  Jota abrio el registro nuevo y vio que TODAS las filas decian "Super Admin".
+--  Con un unico usuario admin la bitacora no puede responder quien hizo que,
+--  que es exactamente para lo que existe. Y con varios admins compartiendo
+--  cuenta es peor: el dia que falte dinero, nadie queda limpio.
+--
+--  LO QUE MIDE, Y POR QUE CADA COSA
+--   1. nombrar y quitar son solo para super admins
+--   2. el codigo tiene formato y es unico
+--   3. UN CODIGO NO SE REUTILIZA NI DESPUES DE QUITAR EL CARGO. Si se
+--      reciclara, las filas viejas del registro pasarian a apuntar a otra
+--      persona: una bitacora que cambia de version del pasado no vale nada.
+--   4. nadie se quita el cargo a si mismo, y siempre queda un super admin.
+--      Sin estas dos, un clic deja al licenciatario fuera de su propio panel
+--      sin nadie que pueda devolverselo.
+--   5. la bitacora guarda la FOTO del codigo y el nombre, no una referencia:
+--      lo que paso en marzo se lee como se leia en marzo (mismo criterio que
+--      motivo_etiqueta el 01/10).
+-- ============================================================================
+do $$
+declare
+  v_super uuid; v_otro_super uuid; v_juan uuid; v_pedro uuid;
+  v_existe boolean;
+  v_nombra boolean := false;
+  v_no_super_rebota boolean := false;
+  v_formato_rebota boolean := false;
+  v_repetido_rebota boolean := false;
+  v_a_si_mismo_rebota boolean := false;
+  v_ultimo_super_rebota boolean := false;
+  v_codigo_reservado boolean := false;
+  v_foto boolean := false;
+  v_msg text := '';
+begin
+  perform _p.limpiar();
+  delete from public.admin_actions;
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'nombrar_admin'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(59, 'Cada admin tiene nombre y codigo',
+      'nombrar_admin y quitar_admin existen y se comportan',
+      false, 'nombrar_admin NO EXISTE: la migracion 20261005120000 no esta aplicada');
+    return;
+  end if;
+
+  v_super      := _p.usuario('jota',  0, true);
+  v_otro_super := _p.usuario('ana',   0, true);
+  v_juan       := _p.usuario('juan',  0);
+  v_pedro      := _p.usuario('pedro', 0);
+
+  -- 1) un usuario normal no nombra a nadie
+  perform _p.actuar_como(v_juan);
+  begin
+    perform public.nombrar_admin(v_pedro, 'P59A', 'Pedro Prueba');
+    v_msg := v_msg || ' un usuario normal pudo nombrar (mal);';
+  exception when sqlstate 'P0001' then
+    v_no_super_rebota := true;
+  end;
+
+  perform _p.actuar_como(v_super);
+
+  -- 2) el super admin si
+  perform public.nombrar_admin(v_juan, 'P59A', 'Juan Prueba');
+  select admin_codigo = 'P59A' and admin_nombre = 'Juan Prueba' and coalesce(es_admin,false)
+    into v_nombra
+  from public.profiles where id = v_juan;
+
+  -- 3) formato
+  begin
+    perform public.nombrar_admin(v_pedro, 'P-59', 'Pedro Prueba');
+    v_msg := v_msg || ' acepto un codigo con formato invalido (mal);';
+  exception when sqlstate 'P0001' then
+    v_formato_rebota := true;
+  end;
+
+  -- 4) unicidad, sin distinguir mayusculas
+  begin
+    perform public.nombrar_admin(v_pedro, 'p59a', 'Pedro Prueba');
+    v_msg := v_msg || ' acepto un codigo repetido (mal);';
+  exception when others then
+    v_repetido_rebota := true;
+  end;
+
+  -- 5) nadie se quita el cargo a si mismo
+  begin
+    perform public.quitar_admin(v_super);
+    v_msg := v_msg || ' se quito el cargo a si mismo (mal);';
+  exception when sqlstate 'P0001' then
+    v_a_si_mismo_rebota := true;
+  end;
+
+  -- 6) un admin que NO es super tampoco puede quitarle el cargo a nadie.
+  --
+  --    AQUI NO SE MIDE la guarda del "ultimo super admin", y conviene explicar
+  --    por que: es INALCANZABLE desde la aplicacion. Para que salte, el que
+  --    sobra tiene que ser el unico super admin -- y entonces quien llama solo
+  --    puede ser el mismo, que ya lo para la guarda de "no te quites el cargo
+  --    a ti mismo". Escribir una prueba para esa rama la haria aprobar por el
+  --    motivo equivocado, que es justo lo que P39 enseno a no hacer.
+  --
+  --    La guarda se queda en la base igualmente: el dia que alguien relaje la
+  --    primera, esa es la que impide dejar la instalacion sin dueno.
+  perform public.quitar_admin(v_otro_super);
+  perform _p.actuar_como(v_juan);   -- juan es admin, pero NO super
+  begin
+    perform public.quitar_admin(v_super);
+    v_msg := v_msg || ' un admin no-super quito un cargo (mal);';
+  exception when sqlstate 'P0001' then
+    v_ultimo_super_rebota := true;
+  end;
+
+  -- 7) el codigo de quien ya no opera sigue reservado
+  perform _p.actuar_como(v_super);
+  perform public.quitar_admin(v_juan);
+  begin
+    perform public.nombrar_admin(v_pedro, 'P59A', 'Pedro Prueba');
+    v_msg := v_msg || ' reutilizo el codigo de un ex-admin (mal);';
+  exception when others then
+    v_codigo_reservado := true;
+  end;
+
+  -- 8) la bitacora guarda la foto
+  select exists (
+    select 1 from public.admin_actions
+    where action = 'nombrar_admin' and admin_nombre is not null
+  ) into v_foto;
+
+  perform _p.anotar(59, 'Cada admin tiene nombre y codigo',
+    'solo un super admin nombra y quita; formato y unicidad del codigo; nadie se quita el cargo a si mismo; el codigo no se reutiliza; la bitacora guarda la foto',
+    v_no_super_rebota and v_nombra and v_formato_rebota and v_repetido_rebota
+      and v_a_si_mismo_rebota and v_ultimo_super_rebota and v_codigo_reservado and v_foto,
+    'no_super=' || v_no_super_rebota::text ||
+    ' nombra=' || v_nombra::text ||
+    ' formato=' || v_formato_rebota::text ||
+    ' repetido=' || v_repetido_rebota::text ||
+    ' a_si_mismo=' || v_a_si_mismo_rebota::text ||
+    ' no_super_no_quita=' || v_ultimo_super_rebota::text ||
+    ' codigo_reservado=' || v_codigo_reservado::text ||
+    ' foto_en_bitacora=' || v_foto::text ||
+    case when v_msg = '' then '' else ' | ' || v_msg end);
+exception when others then
+  perform _p.anotar(59, 'Cada admin tiene nombre y codigo',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+-- ============================================================================
+--  P60 - Nadie procesa su propia solicitud
+--
+--  LA VIA DE FRAUDE MAS CORTA QUE TENIA LA APLICACION, y que solo se abre
+--  cuando hay mas de un administrador:
+--
+--    1. el admin pide una recarga de 50.000 para su propia cuenta
+--    2. el admin se la aprueba
+--    3. el saldo es real: puja, gana, o pide el retiro y se lo paga el mismo
+--
+--  Tres clics, sin tocar la base y sin saber SQL. Hasta el 05/10/2026 las tres
+--  funciones solo comprobaban que quien llama fuera admin; de quien era la
+--  solicitud no preguntaban.
+--
+--  Es separacion de funciones, no desconfianza: quien pide y quien autoriza no
+--  pueden ser la misma persona. Lo cumple cualquier caja del mundo, y no porque
+--  sus empleados sean ladrones, sino para que nadie quede bajo sospecha.
+--
+--  LO QUE ESTA PRUEBA NO PUEDE MEDIR, y conviene tenerlo escrito: dos admins
+--  compinchados se aprueban el uno al otro. Contra eso el software no puede
+--  hacer nada. Lo que si consigue es que el registro diga con nombre y codigo
+--  quien autorizo cada cosa.
+-- ============================================================================
+do $$
+declare
+  v_admin_a uuid; v_admin_b uuid; v_dep uuid; v_ret uuid;
+  v_wallet uuid;
+  v_recarga_propia boolean := false;
+  v_rechazo_propio boolean := false;
+  v_retiro_propio boolean := false;
+  v_otro_si_puede boolean := false;
+  v_msg text := '';
+begin
+  perform _p.limpiar();
+
+  v_admin_a := _p.usuario('admin_a', 0, true);
+  v_admin_b := _p.usuario('admin_b', 2000, true);
+
+  select id into v_wallet from public.wallets where user_id = v_admin_b;
+
+  -- Una recarga pedida POR admin_b
+  -- telefono_pago, referencia y fecha_pago son NOT NULL. No es un detalle del
+  -- arnes: son los datos con los que el admin comprueba el pago, y por eso la
+  -- base no admite una solicitud sin ellos.
+  insert into public.deposit_requests (
+    user_id, monto, metodo, telefono_pago, referencia, fecha_pago, estado)
+  values (
+    v_admin_b, 50000, 'pago_movil', '04120000000', 'P60', current_date,
+    'pendiente'::deposit_status)
+  returning id into v_dep;
+
+  perform _p.actuar_como(v_admin_b);
+
+  -- 1) no se la aprueba el mismo
+  begin
+    perform public.aprobar_recarga(v_dep);
+    v_msg := v_msg || ' se aprobo su propia recarga (MAL);';
+  exception when sqlstate 'P0001' then
+    v_recarga_propia := true;
+  end;
+
+  -- 2) ni se la rechaza el mismo
+  begin
+    perform public.rechazar_recarga(v_dep, 'comprobante_ilegible', null);
+    v_msg := v_msg || ' se rechazo su propia recarga (MAL);';
+  exception
+    when sqlstate 'P0001' then
+      -- OJO: rechazar_recarga valida el MOTIVO antes de mirar de quien es la
+      -- solicitud, y un motivo inexistente tambien levanta P0001. Por eso se
+      -- comprueba el texto: sin esto, la prueba aprobaria porque el motivo no
+      -- existe en esta base, que es la trampa del P39 otra vez.
+      if sqlerrm like '%tu propia solicitud%' then
+        v_rechazo_propio := true;
+      else
+        v_msg := v_msg || ' reboto por otro motivo: ' || sqlerrm || ';';
+      end if;
+    when others then
+      v_msg := v_msg || ' rechazo propio reboto con ' || sqlstate || ';';
+  end;
+
+  -- 3) ni se paga su propio retiro
+  perform public.solicitar_retiro(100, 'pago_movil', '04120000000');
+  select id into v_ret from public.withdraw_requests
+  where user_id = v_admin_b and estado = 'pendiente'::withdraw_status
+  order by monto desc limit 1;
+
+  begin
+    perform public.procesar_retiro(v_ret, 'pagado'::withdraw_status, null, null);
+    v_msg := v_msg || ' se pago su propio retiro (MAL);';
+  exception when sqlstate 'P0001' then
+    v_retiro_propio := true;
+  end;
+
+  -- 4) pero OTRO admin si puede, que es lo que impide que esto sea un candado
+  --    inutil que bloquea la operacion normal
+  perform _p.actuar_como(v_admin_a);
+  begin
+    perform public.aprobar_recarga(v_dep);
+    v_otro_si_puede := (select estado = 'aprobado'::deposit_status
+                        from public.deposit_requests where id = v_dep);
+  exception when others then
+    v_msg := v_msg || ' otro admin NO pudo aprobar (' || sqlstate || '): ' || sqlerrm || ';';
+  end;
+
+  perform _p.anotar(60, 'Nadie procesa su propia solicitud',
+    'un admin no se aprueba ni se rechaza su recarga ni se paga su retiro; otro admin si puede',
+    v_recarga_propia and v_rechazo_propio and v_retiro_propio and v_otro_si_puede,
+    'recarga_propia=' || v_recarga_propia::text ||
+    ' rechazo_propio=' || v_rechazo_propio::text ||
+    ' retiro_propio=' || v_retiro_propio::text ||
+    ' otro_si_puede=' || v_otro_si_puede::text ||
+    case when v_msg = '' then '' else ' | ' || v_msg end);
+exception when others then
+  perform _p.anotar(60, 'Nadie procesa su propia solicitud',
     'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
 end $$;
 

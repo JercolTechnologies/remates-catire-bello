@@ -589,3 +589,64 @@ Jota recordaba que «creo recordar que se movía» estando en ese panel. Es muy 
 **La regla.** Un aviso que solo existe en la pantalla que lo muestra no es un aviso: es un detalle de esa pantalla. Si tiene que llegar «estés donde estés», vive por encima de las pantallas.
 
 **Qué lo revertiría.** Que el panel deje de ser una sola aplicación de cliente —por ejemplo, si la administración se partiera en aplicaciones separadas—. Entonces el canal volvería a necesitar un dueño por aplicación, no por pantalla.
+
+---
+
+## ADR-027 · Un admin no es una casilla booleana: es una persona con nombre
+
+**Fecha.** 05/10/2026
+
+**Contexto.** Jota abrió el registro recién hecho y vio que **todas** las filas decían «Super Admin». No es estética: con un único usuario administrador, `admin_actions` puede decir *qué pasó* pero no *quién lo hizo* — que es literalmente para lo que existe una bitácora.
+
+Y para alquilar la aplicación es peor. El licenciatario va a tener dos o tres personas en caja. Si comparten cuenta, el día que falte dinero no hay forma de saber de quién fue la mano, y ahí el software deja de protegerlo: justo lo que se le está vendiendo.
+
+**Decisión 1: se promueve, no se crea.** La persona se registra como cualquier jugador y un super admin la promueve. La alternativa —una Edge Function con `service_role` que cree el usuario de una vez— es más cómoda y se descartó: obliga a tener esa clave configurada en **cada** instalación de licenciatario, y esa clave es acceso total por encima de toda la RLS. Un secreto que se reparte N veces se filtra una vez. El camino elegido no necesita ningún secreto nuevo: cuatro RPC `security definer` con guarda de super admin, todas auditadas.
+
+**Decisión 2: el código lo escribe una persona.** De 2 a 6 caracteres. `JOTA` o `C01` le dicen algo a quien lee el registro tres meses después; `X7K` generado al azar, no.
+
+**Decisión 3: un código no se reutiliza nunca.** `quitar_admin` baja las banderas pero **conserva código y nombre**. Si se reciclara, las filas viejas del registro pasarían a apuntar a otra persona — y una bitácora que cambia de versión del pasado no vale nada.
+
+**Decisión 4: la bitácora guarda una foto, no una referencia.** `admin_actions` copia código y nombre tal como estaban en el momento. Si alguien cambia de apellido o se le corrige el código, lo que pasó en marzo se sigue leyendo como se leía en marzo. Mismo criterio que `motivo_etiqueta` el 01/10, y por la misma razón.
+
+**Dos guardas que no son burocracia.** Nadie se quita el cargo a sí mismo —un clic deja al licenciatario fuera de su propio panel sin nadie que se lo devuelva— y siempre tiene que quedar un super admin.
+
+**Una guarda que resultó inalcanzable, y se queda.** La del «último super admin» no puede dispararse desde la aplicación: para que salte, el que sobra tiene que ser el único super admin, y entonces quien llama solo puede ser él mismo, a quien ya para la primera guarda. **P59 no la mide a propósito**: una prueba para una rama inalcanzable aprobaría por el motivo equivocado, que es lo que P39 enseñó a no hacer. La guarda se queda en la base como segunda línea: el día que alguien relaje la primera, esa es la que impide dejar la instalación sin dueño.
+
+**Lo que cazó ejecutarlo, y no se habría visto leyendo.** `returns table (... es_super_admin boolean ...)` convierte esos nombres en **variables** de plpgsql, y a partir de ahí un `select es_super_admin from public.profiles` sin cualificar es ambiguo (42702). Dos de las cuatro funciones abortaban. Se corrigió poniendo alias de tabla en las cuatro, incluidas las dos que no lo necesitaban: una regla que se aplica a veces es una regla que se olvida.
+
+**Consecuencias.** `P59` mide las seis cosas. El registro muestra `C01 · María Pérez` y cae al perfil solo para las filas anteriores a esta migración. La pantalla `/admin/super/admins` avisa en ámbar si hay un admin sin código — que es el estado del super admin original hasta que se ponga el suyo.
+
+---
+
+## ADR-028 · Quien pide y quien autoriza no pueden ser la misma persona
+
+**Fecha.** 05/10/2026
+
+**Contexto.** Preparando lo anterior encontré que `aprobar_recarga`, `rechazar_recarga` y `procesar_retiro` solo comprobaban que quien llama fuera admin. **De quién era la solicitud no preguntaban.**
+
+Con un único administrador —que además es el dueño— da igual: aprobarse una recarga es moverse dinero de un bolsillo al otro. En cuanto hay dos, es la vía de fraude más corta que tiene la aplicación:
+
+1. el admin pide una recarga de 50.000 para su propia cuenta
+2. el admin se la aprueba
+3. el saldo es real: puja, gana, o pide el retiro y se lo paga él mismo
+
+Tres clics, sin tocar la base y sin saber SQL, dejando en la bitácora una secuencia que parece normal salvo que alguien se fije en que el que aprueba y el que cobra son el mismo.
+
+**Decisión.** Las tres funciones rechazan la solicitud propia. Va **en el mismo bloque** que la identidad de los admins: entregar la posibilidad de tener varios administradores sin esta guarda sería abrir la puerta y dejar la llave puesta.
+
+Es separación de funciones, no desconfianza. Lo cumple cualquier caja del mundo, y ninguna lo hace porque sus empleados sean ladrones: lo hace para que nadie quede bajo sospecha cuando falta dinero.
+
+**Lo que no impide, y hay que verlo escrito.** Dos admins compinchados se aprueban el uno al otro. Contra eso el software no puede hacer nada y no se pretende. Lo que sí consigue es que la bitácora diga con nombre y código quién autorizó cada cosa.
+
+**UN HALLAZGO QUE SALE DE AQUÍ Y QUE HAY QUE DECIDIR APARTE.**
+
+`aprobar_recarga` tiene un `exception when others → log_admin_action(..., success := false) → raise`. La intención es registrar los intentos fallidos. **No registra nada.** Lo comprobé ejecutándolo: al re-lanzar la excepción, PostgreSQL aborta la transacción entera y se lleva por delante el propio asiento de auditoría. Resultado: **`admin_actions` no puede contener ni una sola fila con `success = false`.** Cero, medido.
+
+Dos consecuencias:
+
+- El filtro «solo las que fallaron» del registro (ADR-023) devuelve siempre vacío. Es un instrumento que da una tranquilidad falsa: «no hay fallos» cuando en realidad es «no se pueden ver».
+- Un admin puede intentar veinte veces algo que no le corresponde y no queda rastro.
+
+No se arregla aquí porque la solución no es obvia. PostgreSQL no tiene transacciones autónomas; las salidas son `dblink` —descartado por ADR-020— o que el frontend, al capturar el error de la RPC, llame a una RPC aparte que registre el intento. Esa segunda transacción sí persiste, pero el dato lo aporta el cliente, así que sirve como ayuda de auditoría y no como control. **Es una decisión de Jota, no mía.**
+
+**Consecuencias.** `P60` mide las tres puertas y, sobre todo, que **otro** admin sí pueda: un candado que bloquea la operación normal se acaba quitando.
