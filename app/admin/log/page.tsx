@@ -109,6 +109,157 @@ const ETIQUETA_LIBRO: Record<string, string> = {
   resultado_remate: "Resultado de remate",
 }
 
+// ---------------------------------------------------------------------------
+//  DE JSON A CASTELLANO
+//
+//  La primera version pintaba `details` con un JSON.stringify y ya. Jota lo
+//  vio y lo dijo en una linea: "eso no esta como muy complicado?". Lo estaba.
+//  Un registro de auditoria que hay que descifrar no se lee, y un registro
+//  que no se lee es un registro que no existe -- que es justo el defecto que
+//  esta pantalla vino a arreglar.
+//
+//  El criterio: lo que se busca al abrir una fila es QUE CAMBIO. Eso va
+//  primero y en palabras; el JSON completo se queda detras de "ver todo",
+//  porque para auditar de verdad a veces hace falta el dato crudo.
+//
+//  Y todo esto degrada bien: una accion nueva, o una clave que todavia no
+//  esta en estas tablas, sale legible igual (guiones bajos por espacios y la
+//  primera en mayuscula) en vez de desaparecer o romper la fila.
+// ---------------------------------------------------------------------------
+
+const ETIQUETA_ACCION: Record<string, string> = {
+  procesar_retiro: "Retiro procesado",
+  rechazar_recarga: "Recarga rechazada",
+  editar_remate: "Remate editado",
+  cancelar_remate: "Remate cancelado",
+  auto_cerrar_remates: "Cierre automático",
+  retirar_caballo: "Caballo retirado",
+  registrar_movimiento_casa: "Asiento en el libro",
+}
+
+const ETIQUETA_TABLA: Record<string, string> = {
+  withdraw_requests: "Retiro",
+  deposit_requests: "Recarga",
+  remates: "Remate",
+  horses: "Caballo",
+  races: "Carrera",
+  house_ledger: "Asiento",
+  profiles: "Usuario",
+  wallets: "Cartera",
+}
+
+const ETIQUETA_CLAVE: Record<string, string> = {
+  monto: "Monto",
+  metodo: "Método",
+  estado: "Estado",
+  estado_previo: "Estado previo",
+  motivo: "Motivo",
+  motivo_etiqueta: "Motivo",
+  motivo_nota: "Nota",
+  devuelto: "Dinero devuelto",
+  telefono_destino: "Teléfono",
+  incremento_minimo: "Incremento",
+  porcentaje_casa: "% casa",
+  opens_at: "Apertura",
+  closes_at: "Cierre",
+  closes_at_vencido: "Cierre vencido",
+  tipo: "Tipo",
+  numero: "Número",
+  habia_pujas: "Había pujas",
+  pozo_total: "Pozo",
+  premio_pagado: "Premio",
+  gano_la_casa: "Ganó la casa",
+  es_admin: "Es admin",
+  antes: "Antes",
+  despues: "Después",
+}
+
+// Identificadores internos. No se ocultan por secreto -- siguen en "ver todo" --
+// sino porque un UUID en medio de una frase la vuelve ilegible y no responde
+// ninguna pregunta que un admin se haga mirando esta pantalla.
+const CLAVES_OCULTAS = new Set([
+  "id", "user_id", "admin_id", "remate_id", "horse_id", "race_id", "wallet_id",
+  "motivo_codigo", "prev", "next",
+])
+
+function tituloDeAccion(a: string) {
+  if (ETIQUETA_ACCION[a]) return ETIQUETA_ACCION[a]
+  const t = a.replace(/_/g, " ")
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+function etiquetaDeClave(k: string) {
+  if (ETIQUETA_CLAVE[k]) return ETIQUETA_CLAVE[k]
+  const t = k.replace(/_/g, " ")
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+// Un UUID entero no cabe y no se recuerda. Los primeros ocho caracteres bastan
+// para reconocer una fila y para buscarla: el buscador de arriba filtra por
+// `target_id` con `ilike`, asi que pegar ese trozo encuentra la misma fila.
+function idCorto(id: string | null | undefined) {
+  if (!id) return ""
+  return id.length > 8 ? id.slice(0, 8) : id
+}
+
+function textoDeValor(clave: string, v: unknown): string {
+  if (v === null || v === undefined) return "(vacío)"
+  if (typeof v === "boolean") return v ? "sí" : "no"
+  if (typeof v === "number") {
+    if (clave === "monto" || clave === "pozo_total" || clave === "premio_pagado") {
+      return `${formatMoney(v)} Bs`
+    }
+    if (clave === "porcentaje_casa") return `${v}%`
+    return String(v)
+  }
+  if (typeof v === "string") {
+    // Una marca de tiempo se lee como fecha, no como cadena ISO.
+    if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return formatDT(v)
+    return v
+  }
+  return JSON.stringify(v)
+}
+
+function resumirDetalles(d: unknown): string[] {
+  if (!d || typeof d !== "object" || Array.isArray(d)) return []
+  const obj = d as Record<string, unknown>
+  const fuera: string[] = []
+
+  // EL CAMBIO DE ESTADO VA PRIMERO. Es lo que se busca al abrir una fila:
+  // "pendiente → pagado" responde la pregunta antes de leer nada mas.
+  const prev = obj.prev as Record<string, unknown> | undefined
+  const next = obj.next as Record<string, unknown> | undefined
+  const antes = prev && typeof prev === "object" ? prev.estado : undefined
+  const despues = next && typeof next === "object" ? next.estado : undefined
+  if (antes || despues) fuera.push(`${antes ?? "?"} → ${despues ?? "?"}`)
+
+  for (const [k, v] of Object.entries(obj)) {
+    if (CLAVES_OCULTAS.has(k)) continue
+    if (v === null || v === undefined) continue
+
+    // La forma {antes, despues} la usan las ediciones de remate.
+    if (v && typeof v === "object" && !Array.isArray(v) && ("antes" in v || "despues" in v)) {
+      const par = v as Record<string, unknown>
+      fuera.push(
+        `${etiquetaDeClave(k)}: ${textoDeValor(k, par.antes)} → ${textoDeValor(k, par.despues)}`
+      )
+      continue
+    }
+
+    // Cualquier otro objeto se queda para "ver todo": meterlo aqui seria
+    // volver a pintar JSON con otra letra.
+    if (typeof v === "object") continue
+
+    // Un booleano en false no aporta: "Dinero devuelto: no" ocupa sitio para
+    // decir que no paso nada.
+    if (typeof v === "boolean" && v === false) continue
+
+    fuera.push(`${etiquetaDeClave(k)}: ${textoDeValor(k, v)}`)
+  }
+
+  return fuera
+}
+
 type Fila = {
   id: string
   cuando: string | null
@@ -119,7 +270,10 @@ type Fila = {
   texto: string
   ref: string | null
   ok: boolean
-  extra: string | null
+  /** Lo que cambio, ya en castellano. Se pinta como etiquetas. */
+  resumen: string[]
+  /** El JSON tal cual, detras de "ver todo". Para auditar de verdad. */
+  crudo: string | null
 }
 
 export default function AdminLogPage() {
@@ -252,7 +406,8 @@ export default function AdminLogPage() {
             texto: r.descripcion || "",
             ref: r.ref_externa,
             ok: true,
-            extra: null,
+            resumen: [],
+            crudo: null,
           }))
         } else if (pestana === "libro") {
           let q = supabase
@@ -284,7 +439,8 @@ export default function AdminLogPage() {
             texto: r.motivo || "",
             ref: r.ref_externa,
             ok: true,
-            extra: null,
+            resumen: [],
+            crudo: null,
           }))
         } else {
           let q = supabase
@@ -310,16 +466,19 @@ export default function AdminLogPage() {
             // -que no lo dispara nadie- pudiera auditarse igual.
             quien: r.admin_id ? nombres[r.admin_id] || "(desconocido)" : "El sistema",
             tipo: r.action,
-            etiqueta: r.action,
+            etiqueta: tituloDeAccion(r.action),
             monto: null,
-            texto: `${r.target_table} ${r.target_id}`,
+            // "Retiro 62cb1f1b" en vez de
+            // "withdraw_requests 62cb1f1b-4f70-4fed-8135-ab78401f9521".
+            texto: `${ETIQUETA_TABLA[r.target_table] || r.target_table} ${idCorto(r.target_id)}`,
             ref: null,
             ok: r.success !== false,
-            extra: r.error
-              ? String(r.error)
-              : r.details
-                ? JSON.stringify(r.details)
-                : null,
+            // El error, si lo hubo, es lo primero que hay que leer: se cuela
+            // delante del resumen en vez de quedarse en "ver todo".
+            resumen: r.error
+              ? [`Error: ${String(r.error)}`, ...resumirDetalles(r.details)]
+              : resumirDetalles(r.details),
+            crudo: r.details ? JSON.stringify(r.details, null, 2) : null,
           }))
         }
 
@@ -376,7 +535,7 @@ export default function AdminLogPage() {
   // en el boton: un CSV que promete "todo" y trae 50 filas es peor que no
   // tenerlo.
   function descargarCSV() {
-    const cab = ["fecha", "quien", "tipo", "monto", "detalle", "referencia", "ok", "extra"]
+    const cab = ["fecha", "quien", "tipo", "monto", "detalle", "resumen", "referencia", "ok", "crudo"]
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`
     const cuerpo = filas.map((f) =>
       [
@@ -385,9 +544,12 @@ export default function AdminLogPage() {
         f.etiqueta,
         f.monto === null ? "" : f.monto,
         f.texto,
+        f.resumen.join(" | "),
         f.ref ?? "",
         f.ok ? "si" : "NO",
-        f.extra ?? "",
+        // El JSON crudo va entero en el CSV aunque en pantalla este plegado:
+        // quien se baja el archivo lo hace para auditar, no para ojear.
+        f.crudo ?? "",
       ]
         .map(esc)
         .join(";")
@@ -581,8 +743,32 @@ export default function AdminLogPage() {
                   <div className="mt-1 text-[11px] text-zinc-500 break-all">ref: {f.ref}</div>
                 ) : null}
 
-                {f.extra ? (
-                  <div className="mt-1 text-[11px] text-zinc-500 break-all">{f.extra}</div>
+                {f.resumen.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {f.resumen.map((r, i) => (
+                      <span
+                        key={i}
+                        className={`rounded-lg border px-2 py-0.5 text-[11px] ${
+                          i === 0 && !f.ok
+                            ? "border-red-500/40 bg-red-500/10 text-red-200"
+                            : i === 0 && r.includes("→")
+                              ? "border-zinc-700 bg-zinc-950/80 text-zinc-100 font-semibold"
+                              : "border-zinc-800 bg-zinc-950/60 text-zinc-400"
+                        }`}
+                      >
+                        {r}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                {f.crudo ? (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-[11px] text-zinc-600">ver todo</summary>
+                    <pre className="mt-1 whitespace-pre-wrap break-all rounded-lg bg-zinc-950/60 p-2 text-[11px] text-zinc-500">
+                      {f.crudo}
+                    </pre>
+                  </details>
                 ) : null}
               </div>
             ))}

@@ -127,7 +127,7 @@ No necesitan Docker ni base: transpilan el archivo real y ejercitan sus funcione
 
 ```powershell
 pnpm test:fechas   # app/components/SelectorFechaHora.tsx  (31 comprobaciones)
-pnpm test:log      # app/admin/log/page.tsx                (19 comprobaciones)
+pnpm test:log      # app/admin/log/page.tsx                (32 comprobaciones)
 ```
 
 ---

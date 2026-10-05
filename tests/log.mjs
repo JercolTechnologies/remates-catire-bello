@@ -39,7 +39,26 @@ const js = ts.transpileModule(src, {
   compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None, jsx: ts.JsxEmit.None },
 }).outputText
 
-const nombres = ["limpiarBusqueda", "inicioDelDia", "finDelDia"]
+const nombres = [
+  "limpiarBusqueda", "inicioDelDia", "finDelDia",
+  "n", "formatMoney", "formatDT",
+  "tituloDeAccion", "etiquetaDeClave", "idCorto", "textoDeValor", "resumirDetalles",
+]
+
+// Las constantes de nivel superior (los diccionarios y el Set) no son
+// funciones, asi que se extraen por su cuenta: desde `const NOMBRE` hasta la
+// primera linea que cierra en la columna 0.
+const constantes = ["ETIQUETA_ACCION", "ETIQUETA_TABLA", "ETIQUETA_CLAVE", "CLAVES_OCULTAS"]
+
+function sacaConst(nombre) {
+  const i = js.indexOf(`const ${nombre} =`)
+  if (i < 0) throw new Error(`no se encontro const ${nombre} en ${ARCHIVO}`)
+  const fin = js.indexOf("\n};\n", i)
+  const fin2 = js.indexOf("\n]);\n", i)
+  const corte = [fin, fin2].filter((x) => x >= 0).sort((a, b) => a - b)[0]
+  if (corte === undefined) throw new Error(`no se pudo cerrar const ${nombre}`)
+  return js.slice(i, js.indexOf("\n", corte + 1))
+}
 
 function saca(nombre) {
   const i = js.indexOf(`function ${nombre}(`)
@@ -48,7 +67,12 @@ function saca(nombre) {
   return js.slice(i, j)
 }
 
-const f = new Function(nombres.map(saca).join("\n") + `\nreturn {${nombres.join(",")}}`)()
+const f = new Function(
+  constantes.map(sacaConst).join("\n") +
+    "\n" +
+    nombres.map(saca).join("\n") +
+    `\nreturn {${nombres.join(",")}}`
+)()
 
 let fallos = 0
 function ok(nombre, real, esperado) {
@@ -100,6 +124,67 @@ ok("el rango dura justo un dia",
 // veces.
 ok("dos dias seguidos no se solapan",
    new Date(f.inicioDelDia("2026-10-06")).getTime() > new Date(fin).getTime(), true)
+
+// --- de JSON a castellano -------------------------------------------------
+// Los tres `details` de abajo son REALES: salieron de produccion el 05/10/2026
+// y son los que Jota vio en pantalla cuando dijo "eso no esta como muy
+// complicado?". Si alguna vez un cambio vuelve a dejarlos ilegibles, esto se
+// pone en rojo antes de que lo vea el.
+
+ok("accion conocida",   f.tituloDeAccion("procesar_retiro"), "Retiro procesado")
+ok("accion desconocida se lee igual", f.tituloDeAccion("algo_nuevo_por_ahi"), "Algo nuevo por ahi")
+ok("clave desconocida se lee igual",  f.etiquetaDeClave("campo_raro"), "Campo raro")
+ok("uuid recortado", f.idCorto("62cb1f1b-4f70-4fed-8135-ab78401f9521"), "62cb1f1b")
+ok("id corto se respeta", f.idCorto("abc"), "abc")
+ok("id vacio", f.idCorto(null), "")
+
+const pago = {
+  next: { estado: "pagado" },
+  prev: { estado: "pendiente" },
+  monto: 500,
+  metodo: "pago_movil",
+  user_id: "33c157c3-f11f-41c9-9abe-1c49fe74aefa",
+  telefono_destino: "04121234567",
+}
+ok("retiro pagado", f.resumirDetalles(pago), [
+  "pendiente → pagado",
+  "Monto: 500,00 Bs",
+  "Método: pago_movil",
+  "Teléfono: 04121234567",
+])
+
+const rechazo = {
+  next: { estado: "rechazado" },
+  prev: { estado: "pendiente" },
+  monto: 1000,
+  user_id: "b23d31c9-5cd8-4c42-9ae4-a74770acd8c6",
+  devuelto: true,
+  motivo_nota: null,
+  motivo_codigo: "datos_destino_incorrectos",
+  motivo_etiqueta: "Los datos de destino no son correctos",
+}
+ok("retiro rechazado", f.resumirDetalles(rechazo), [
+  "pendiente → rechazado",
+  "Monto: 1.000,00 Bs",
+  "Dinero devuelto: sí",
+  "Motivo: Los datos de destino no son correctos",
+])
+
+// La forma {antes, despues} la usan las ediciones de remate.
+ok("edicion de remate", f.resumirDetalles({ incremento_minimo: { antes: 10, despues: 50 } }), [
+  "Incremento: 10 → 50",
+])
+
+// Ningun UUID puede sobrevivir al resumen: un identificador en medio de una
+// frase la vuelve ilegible, y para eso esta "ver todo".
+const resumenes = [...f.resumirDetalles(pago), ...f.resumirDetalles(rechazo)].join(" ")
+ok("ningun uuid en el resumen", /[0-9a-f]{8}-[0-9a-f]{4}-/.test(resumenes), false)
+
+// Casos de borde: nada que resumir no puede reventar la fila.
+ok("details nulo",  f.resumirDetalles(null), [])
+ok("details vacio", f.resumirDetalles({}), [])
+ok("details que no es objeto", f.resumirDetalles("texto suelto"), [])
+ok("un booleano en false no ocupa sitio", f.resumirDetalles({ devuelto: false }), [])
 
 console.log(fallos === 0 ? `\nTodo en verde.` : `\n${fallos} en rojo.`)
 process.exit(fallos === 0 ? 0 : 1)

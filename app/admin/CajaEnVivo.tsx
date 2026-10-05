@@ -69,6 +69,12 @@ export function CajaEnVivo({ children }: { children: React.ReactNode }) {
   const [recargas, setRecargas] = useState(0)
   const [retiros, setRetiros] = useState(0)
   const [destacar, setDestacar] = useState(false)
+  // "Comprobar" leia los contadores y, si no habian cambiado, no pasaba
+  // absolutamente nada en pantalla. Jota: "no funciona, no se puede ni clicar,
+  // es como si fuera simple texto". El boton SI hacia su trabajo; lo que no
+  // hacia era decirlo. Un control sin acuse de recibo es un control roto,
+  // aunque el codigo de debajo este bien.
+  const [comprobando, setComprobando] = useState<"no" | "si" | "listo">("no")
 
   // Los últimos contadores vistos, para saber si lo que llegó es NUEVO. Va en
   // una referencia y no en estado: solo sirve para comparar, y meterlo en el
@@ -197,10 +203,16 @@ export function CajaEnVivo({ children }: { children: React.ReactNode }) {
               ) : null}
             </div>
             <button
-              onClick={() => void contar()}
-              className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300"
+              onClick={async () => {
+                setComprobando("si")
+                await contar()
+                setComprobando("listo")
+                window.setTimeout(() => setComprobando("no"), 1500)
+              }}
+              disabled={comprobando === "si"}
+              className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 active:bg-zinc-700 disabled:opacity-60"
             >
-              Comprobar
+              {comprobando === "si" ? "Comprobando..." : comprobando === "listo" ? "Al día" : "Comprobar"}
             </button>
           </div>
         </div>

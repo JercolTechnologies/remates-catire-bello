@@ -469,10 +469,20 @@ PostgREST lee **esa cadena como sintaxis**: la coma separa condiciones y los par
 De ahí `limpiarBusqueda`, que saca `, ( ) * " % \` antes de construir el filtro. El admin escribe palabras, no sintaxis.
 
 **Consecuencias.**
-- `tests/log.mjs` (`pnpm test:log`), con el mismo método que `tests/fechas.mjs`: transpila el archivo **real** y ejercita sus funciones, sin copias que se despeguen del original. 19 comprobaciones, incluida una que exige que **ningún** carácter de sintaxis sobreviva, y otra que mide que el rango de un día dure exactamente un día menos un milisegundo — dos días seguidos no pueden devolver la misma fila dos veces.
+- `tests/log.mjs` (`pnpm test:log`), con el mismo método que `tests/fechas.mjs`: transpila el archivo **real** y ejercita sus funciones, sin copias que se despeguen del original. **32 comprobaciones**, incluida una que exige que **ningún** carácter de sintaxis sobreviva, otra que mide que el rango de un día dure exactamente un día menos un milisegundo — dos días seguidos no pueden devolver la misma fila dos veces — y las de legibilidad del apartado siguiente.
 - Las horas se pintan en la zona del navegador, como el resto de la aplicación, **y la pantalla dice cuál es**. En un registro de auditoría una hora sin zona no sirve de nada; cambiar la convención en una sola pantalla habría creado la inconsistencia que estamos evitando.
 - `max-w-3xl` en vez del `max-w-md` del resto del panel: fecha, actor, importe, descripción y referencia no caben en ancho de teléfono sin partir cada fila en cuatro líneas. Es la única pantalla que se sale, y se sale a propósito.
 - El CSV exporta **lo que está cargado en pantalla**, y el botón lo dice con el número de filas. Un CSV que promete "todo" y trae 50 filas es peor que no tenerlo.
+
+**Lo que hubo que rehacer el mismo día: de JSON a castellano.** La primera versión pintaba `details` con un `JSON.stringify` y ya. Jota lo vio y lo dijo en una línea: *«¿eso no está como muy complicado?»*. Lo estaba — y un registro de auditoría que hay que descifrar no se lee, que es exactamente el defecto que esta pantalla venía a arreglar.
+
+El criterio: lo que se busca al abrir una fila es **qué cambió**. Eso va primero y en palabras (`pendiente → pagado`), lo demás en etiquetas cortas (`Monto: 500,00 Bs`, `Motivo: Los datos de destino no son correctos`), los UUID recortados a ocho caracteres — que siguen sirviendo para buscar, porque el filtro usa `ilike` — y el JSON completo detrás de un `ver todo`, porque para auditar de verdad a veces hace falta el dato crudo.
+
+Degrada bien a propósito: una acción o una clave que no esté en los diccionarios sale legible igual (guiones bajos por espacios, primera en mayúscula) en vez de desaparecer o romper la fila. Una tabla de traducción que hay que mantener al día acaba desactualizada; esta no puede.
+
+**Y el botón que «no se podía clicar».** El «Comprobar» de la barra de caja leía los contadores y, si no habían cambiado, no pasaba nada en pantalla. Jota: *«no funciona, no se puede ni clicar, es como si fuera simple texto»*. El botón sí hacía su trabajo; lo que no hacía era decirlo. **Un control sin acuse de recibo es un control roto**, aunque el código de debajo esté bien. Ahora pasa por «Comprobando...» y «Al día».
+
+Y de paso quedó comprobado que la manito **no** era el problema: la regla de `cursor: pointer` para Tailwind v4 ya estaba en `globals.css` desde el 25/09. Lo verifiqué leyendo el `preflight.css` de tailwindcss 4.3.3 instalado — cero `cursor: pointer` en todo el archivo — antes de afirmar nada.
 
 **Qué lo revertiría.** Que el volumen crezca hasta que paginar desde el cliente deje de servir — ahí haría falta una RPC con la consulta ya resuelta y un índice por fecha. Con dos dígitos de operaciones al día, todavía no.
 
