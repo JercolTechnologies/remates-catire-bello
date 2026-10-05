@@ -50,7 +50,7 @@ No leas todo. Lee lo que toca:
 | tocar realtime | ADR-024, ADR-025, ADR-026 + `lib/realtime.ts` |
 | tocar contabilidad | ADR-022 + `supabase/migrations/20261005100000_descuadre_inexplicado.sql` |
 | dar de alta un licenciatario | `docs/supabase/INSTALACION_LICENCIATARIO.md` |
-| saber qué falta | `PENDIENTES_2026-10-01.md` y `BACKLOG_FASE1_FIXES.md` |
+| saber qué falta | `PENDIENTES_2026-10-05.md` (el 10-01 es histórico) y `BACKLOG_FASE1_FIXES.md` |
 
 `ADR.md` son 28 decisiones con su contexto, su alternativa descartada y qué las
 revertiría. **Casi siempre la pregunta que te estás haciendo ya está contestada ahí.**
