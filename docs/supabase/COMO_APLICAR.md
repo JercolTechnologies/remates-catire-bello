@@ -57,7 +57,7 @@ Si `$db` sale vacío, el contenedor no está arriba: `pnpm db:start` primero.
 
 ### `tests/pruebas_dinero.sql` — el arnés
 
-54 pruebas de reglas de dinero, permisos y contabilidad. Corre con **una sola conexión**. Al empezar baja los mínimos de `ajustes_instalacion` a 10/100 porque sus 42 escenarios están escritos sobre un incremento de 10; al terminar los devuelve a 50/100, los de producción. Si cortas el arnés a medias, revisa esa tabla antes de abrir la aplicación contra la base local. Al terminar imprime la tabla de resultados y **limpia los datos que creó**, para que la base quede vacía si después vas a abrir la aplicación contra ella.
+58 pruebas de reglas de dinero, permisos y contabilidad. Corre con **una sola conexión**. Al empezar baja los mínimos de `ajustes_instalacion` a **1/1** y `pct_apostado_para_retirar` a **0**, porque sus escenarios están escritos sobre un incremento de 10 y un par de pruebas usan números aún más bajos a propósito; el arnés no mide mínimos, los miden P54 y P55, que se los ponen ellas mismas. Al terminar los devuelve a 50/100/50, los de producción. Si cortas el arnés a medias, revisa esa tabla antes de abrir la aplicación contra la base local. Al terminar imprime la tabla de resultados y **limpia los datos que creó**, para que la base quede vacía si después vas a abrir la aplicación contra ella.
 
 ### `tests/concurrencia.sql` — las carreras
 
@@ -86,7 +86,38 @@ La prueba 0 comprueba además que la **segunda conexión** se pudo abrir, y en e
 
 **No se usa `psql` suelto** (no está instalado en Windows) ni `npx supabase db query` (no devuelve la tabla de resultados del arnés). El `psql` que corre es el que vive dentro del contenedor.
 
-**Marcador esperado al 23/09/2026: 12 en verde, 3 en rojo, de 15.** Los tres rojos son defectos reproducidos a propósito — tareas 1.1, 1.2 y 1.3, absorbidas por el bloque 2. Si te da otro número, algo cambió: compáralo contra la tabla de la sección 0.3 de `BACKLOG_FASE1_FIXES.md`.
+**Marcador esperado al 05/10/2026: 58 en verde, 0 en rojo, de 58** en el arnés, y **4 de 4** en concurrencia. Cualquier otro número significa que algo cambió — no lo des por bueno sin leer el detalle de la fila en rojo, que dice exactamente qué midió y con qué valores.
+
+---
+
+## Comprobar qué migraciones están aplicadas en producción
+
+**Hazlo después de cada `db push`, antes de tocar el frontend.** El 01/10/2026
+`db push` no llegó a aplicar `20261001130000_motivo_de_rechazo.sql` y el
+despliegue de Vercel sí salió: la aplicación quedó pidiéndole a la base
+columnas que no existían, y el primer aviso fue un `column
+deposit_requests.motivo_etiqueta does not exist` en la cara del cliente.
+
+La causa de fondo no fue el push: fue que **no había manera de comprobar que el
+primer paso hubiera salido bien** antes de dar el segundo. Esta consulta es esa
+manera. Se pega entera en el SQL Editor del panel, contra producción:
+
+```sql
+select version
+from supabase_migrations.schema_migrations
+order by version desc
+limit 10;
+```
+
+La de arriba del todo tiene que ser la última que escribiste en
+`supabase/migrations/`. Si no está, **el push no llegó**, y da igual lo que diga
+el frontend: no despliegues encima.
+
+Si quieres comprobar algo más fino que el nombre del archivo — que una función
+concreta exista con su firma nueva, por ejemplo — eso es lo que mide el arnés,
+y cada prueba que depende de una migración empieza comprobando que la función
+existe. Una prueba que aprueba porque la función no existe es el peor resultado
+posible; está explicado en P39.
 
 ---
 

@@ -46,6 +46,9 @@ type Casa = {
   resultado_operativo: number
   perdida_usuarios: number
   descuadre: number
+  pendiente_de_liquidar: number
+  descuadre_inexplicado: number
+  remates_sin_liquidar: number
   cubierto: boolean
 }
 
@@ -147,6 +150,9 @@ export default function AdminContabilidadPage() {
               resultado_operativo: n(c.resultado_operativo),
               perdida_usuarios: n(c.perdida_usuarios),
               descuadre: n(c.descuadre),
+              pendiente_de_liquidar: n(c.pendiente_de_liquidar),
+              descuadre_inexplicado: n(c.descuadre_inexplicado),
+              remates_sin_liquidar: n(c.remates_sin_liquidar),
               cubierto: !!c.cubierto,
             }
           : null
@@ -282,17 +288,50 @@ export default function AdminContabilidadPage() {
           </div>
         ) : null}
 
-        {/* ALARMA DE CUADRE. El libro y los saldos tienen que contar la misma
-            historia. Si no, hay un bug o alguien metio mano. */}
-        {casa && Math.abs(casa.descuadre) > 0.009 ? (
+        {/* ALARMA DE CUADRE.
+            Antes se encendia con `descuadre` a secas, y eso la hacia sonar
+            SIEMPRE: cerrar le cobra a los lideres y liquidar escribe el
+            asiento, asi que entre las dos cosas el libro va por detras de los
+            saldos a proposito. Comprobado contra produccion el 05/10/2026:
+            descuadre -1.380,00 y cobrado sin asentar 1.380,00, el mismo numero
+            al centimo, con la contabilidad intacta.
+            Una alarma que se enciende cuando no pasa nada es una alarma que se
+            aprende a ignorar, y el dia que senale una fuga de verdad nadie le
+            va a creer. Ahora se enciende con `descuadre_inexplicado`, que es lo
+            que queda despues de descontar lo que ya tiene explicacion. */}
+        {casa && Math.abs(casa.descuadre_inexplicado) > 0.009 ? (
           <div className="mt-4 rounded-2xl bg-amber-500/15 p-4 ring-1 ring-amber-500/40">
-            <div className="text-sm font-bold text-amber-200">El libro no cuadra con los saldos</div>
+            <div className="text-sm font-bold text-amber-200">Hay dinero que no cuadra</div>
             <div className="mt-1 text-sm text-amber-100">
-              Diferencia de <span className="font-semibold">{formatMoney(casa.descuadre)} Bs</span>.
+              Sobran o faltan{" "}
+              <span className="font-semibold">{formatMoney(Math.abs(casa.descuadre_inexplicado))} Bs</span> que no
+              explica ningún remate pendiente de liquidar.
             </div>
             <div className="mt-2 text-[11px] text-amber-200/80">
-              Libro: {formatMoney(casa.resultado_operativo)} Bs · Saldos: {formatMoney(casa.perdida_usuarios)} Bs.
-              Esto no deberia pasar nunca: avisa antes de seguir operando.
+              Libro: {formatMoney(casa.resultado_operativo)} Bs · Saldos: {formatMoney(casa.perdida_usuarios)} Bs
+              {casa.pendiente_de_liquidar > 0.009
+                ? ` · pendiente de asentar: ${formatMoney(casa.pendiente_de_liquidar)} Bs`
+                : ""}
+              . Esto sí es un movimiento de saldo sin asiento: revísalo antes de seguir operando.
+            </div>
+          </div>
+        ) : null}
+
+        {/* LO NORMAL, EN GRIS Y SIN ALARMA. Informa, no asusta. */}
+        {casa && casa.pendiente_de_liquidar > 0.009 ? (
+          <div className="mt-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4">
+            <div className="text-sm font-semibold text-zinc-200">
+              {casa.remates_sin_liquidar === 1
+                ? "1 remate cerrado sin liquidar"
+                : `${casa.remates_sin_liquidar} remates cerrados sin liquidar`}
+            </div>
+            <div className="mt-1 text-sm text-zinc-300">
+              <span className="font-semibold">{formatMoney(casa.pendiente_de_liquidar)} Bs</span> ya cobrados a los
+              jugadores que todavía no tienen asiento en el libro.
+            </div>
+            <div className="mt-2 text-[11px] text-zinc-500">
+              Es normal: cerrar cobra, liquidar asienta. El libro va por detrás hasta que los liquides, y entonces
+              esta cifra baja sola.
             </div>
           </div>
         ) : null}

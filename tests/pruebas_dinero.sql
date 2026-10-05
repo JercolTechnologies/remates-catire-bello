@@ -3840,6 +3840,240 @@ exception when others then
 end $$;
 
 
+-- ============================================================================
+--  P57 - Los horarios de un remate se pueden QUITAR, y quitarlos significa algo
+--
+--  LO QUE MIDE
+--  `editar_remate` decidia si tocaba el horario con `p_opens_at is not null`.
+--  Con ese contrato NULL quiere decir "no lo cambies", asi que el admin borraba
+--  la hora de cierre en la pantalla, guardaba, no salia ningun error... y el
+--  cierre seguia ahi. La pantalla decia una cosa y la base guardaba otra, en
+--  silencio. La migracion 20261002100000 anade una bandera por campo.
+--
+--  Y de paso mide la regla nueva: un remate SIN apertura esta activo desde que
+--  se crea. Eso ya lo soportaba `hacer_puja` con su guarda de nulo, pero no
+--  habia ninguna prueba que lo dijera, asi que nada impedia que alguien
+--  "arreglara" esa guarda y rompiera la funcion sin que el arnes se enterara.
+--
+--  LA LECCION DE P39 APLICADA: lo primero es comprobar que la firma nueva
+--  existe y que es UNA SOLA. Si quedaran las dos firmas, PostgREST no sabria
+--  cual llamar (PGRST203) y la aplicacion se cae aunque el SQL funcione.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid; v_u1 uuid; v_rem uuid; v_h1 uuid;
+  v_tiene_banderas boolean;
+  v_una_sola_firma boolean;
+  v_null_no_borra boolean := false;
+  v_quita_cierre boolean := false;
+  v_quita_apertura boolean := false;
+  v_puja_sin_apertura boolean := false;
+  v_contradiccion boolean := false;
+  v_detalle text := '';
+begin
+  perform _p.limpiar();
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'editar_remate'
+      and pg_get_function_arguments(p.oid) ilike '%p_limpiar_opens_at%'
+      and pg_get_function_arguments(p.oid) ilike '%p_limpiar_closes_at%'
+  ) into v_tiene_banderas;
+
+  if not v_tiene_banderas then
+    perform _p.anotar(57, 'Los horarios de un remate se pueden quitar',
+      'editar_remate acepta p_limpiar_opens_at y p_limpiar_closes_at',
+      false, 'editar_remate NO tiene las banderas: la migracion 20261002100000 no esta aplicada');
+    return;
+  end if;
+
+  select count(*) = 1 into v_una_sola_firma
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.proname = 'editar_remate';
+
+  v_admin := _p.usuario('admin', 0, true);
+  v_u1    := _p.usuario('juan', 10000);
+  v_rem   := _p.escenario(2, 100, 25);   -- nace con apertura Y cierre puestos
+  v_h1    := _p.caballo(v_rem, 1);
+
+  perform _p.actuar_como(v_admin);
+
+  -- 1) NULL sigue queriendo decir "no lo cambies". Esto es lo que protege al
+  --    resto de la aplicacion: cualquier llamada vieja de seis argumentos no
+  --    puede borrar un horario por accidente.
+  perform public.editar_remate(v_rem, null, null, null, null, null);
+  select opens_at is not null and closes_at is not null into v_null_no_borra
+  from public.remates where id = v_rem;
+
+  -- 2) la bandera si borra el cierre
+  perform public.editar_remate(p_remate_id => v_rem, p_limpiar_closes_at => true);
+  select closes_at is null into v_quita_cierre from public.remates where id = v_rem;
+
+  -- 3) y la apertura
+  perform public.editar_remate(p_remate_id => v_rem, p_limpiar_opens_at => true);
+  select opens_at is null into v_quita_apertura from public.remates where id = v_rem;
+
+  -- 4) un remate sin apertura esta ACTIVO: se puede pujar. Si esto falla, la
+  --    guarda de nulo de hacer_puja se rompio.
+  perform _p.actuar_como(v_u1);
+  begin
+    perform public.hacer_puja(v_rem, v_h1, 100, true);
+    v_puja_sin_apertura := true;
+  exception when others then
+    v_detalle := v_detalle || ' | la puja sin apertura fallo (' || sqlstate || '): ' || sqlerrm;
+  end;
+  perform _p.actuar_como(v_admin);
+
+  -- 5) poner y quitar en la misma llamada es una orden contradictoria: se
+  --    rechaza en vez de adivinar cual gana. Y tiene que rechazarlo NUESTRO
+  --    codigo (P0001), no un error de tipos.
+  begin
+    perform public.editar_remate(
+      p_remate_id => v_rem, p_opens_at => now(), p_limpiar_opens_at => true);
+    v_detalle := v_detalle || ' | acepto poner y quitar a la vez (mal)';
+  exception when others then
+    if sqlstate = 'P0001' then
+      v_contradiccion := true;
+    else
+      v_detalle := v_detalle || ' | rechazo la contradiccion por el motivo equivocado ('
+                   || sqlstate || '): ' || sqlerrm;
+    end if;
+  end;
+
+  perform _p.anotar(57, 'Los horarios de un remate se pueden quitar',
+    'una sola firma; null no borra; la bandera borra apertura y cierre; sin apertura se puede pujar; poner y quitar a la vez se rechaza con P0001',
+    v_una_sola_firma and v_null_no_borra and v_quita_cierre and v_quita_apertura
+      and v_puja_sin_apertura and v_contradiccion,
+    'una_sola_firma=' || v_una_sola_firma::text ||
+    ' null_no_borra=' || v_null_no_borra::text ||
+    ' quita_cierre=' || v_quita_cierre::text ||
+    ' quita_apertura=' || v_quita_apertura::text ||
+    ' puja_sin_apertura=' || v_puja_sin_apertura::text ||
+    ' contradiccion_rechazada=' || v_contradiccion::text ||
+    v_detalle);
+exception when others then
+  perform _p.anotar(57, 'Los horarios de un remate se pueden quitar',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+-- ============================================================================
+--  P58 - El descuadre normal no es una alarma; el que no tiene explicacion si
+--
+--  DE DONDE SALE ESTA PRUEBA
+--  El 05/10/2026 el panel de contabilidad llevaba dias mostrando en ambar
+--  "El libro no cuadra con los saldos. Diferencia de -1.380,00 Bs. Esto no
+--  deberia pasar nunca". Se midio contra produccion: habia 8 remates cerrados
+--  sin liquidar y lo cobrado sin asentar era 1.380,00 exactos. La contabilidad
+--  estaba intacta; la alarma estaba mal.
+--
+--  Cerrar le COBRA a los lideres. Liquidar escribe el ASIENTO. Entre las dos
+--  cosas el libro va por detras de los saldos, a proposito. Una alarma que se
+--  enciende en esa situacion se enciende casi siempre, y una alarma que se
+--  enciende casi siempre no la mira nadie.
+--
+--  LO QUE MIDE, Y POR QUE LAS TRES FASES
+--    1) cerrado y sin liquidar -> descuadre != 0, PERO inexplicado = 0
+--    2) liquidado              -> las tres cifras a 0
+--    3) un saldo movido a mano -> inexplicado = exactamente ese importe
+--
+--  La fase 3 es la que impide que esto sea un arreglo cosmetico. Sin ella, una
+--  implementacion que devolviera `descuadre_inexplicado = 0` siempre pasaria
+--  las dos primeras. Lo que se esta midiendo no es que la alarma se calle: es
+--  que siga sonando cuando tiene que sonar.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid; v_u1 uuid; v_u2 uuid; v_rem uuid; v_h1 uuid; v_h2 uuid; v_h3 uuid;
+  v_wallet uuid;
+  r record;
+  v_tiene_columnas boolean;
+  v_fase1 boolean := false;
+  v_fase2 boolean := false;
+  v_fase3 boolean := false;
+  v_detalle text := '';
+begin
+  perform _p.limpiar();
+  delete from public.house_ledger;
+
+  -- Lo primero, como en P39: si las columnas no existen, esto no esta midiendo
+  -- nada y hay que decirlo, no aprobar por omision.
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'casa_resumen'
+      and pg_get_function_result(p.oid) ilike '%descuadre_inexplicado%'
+      and pg_get_function_result(p.oid) ilike '%pendiente_de_liquidar%'
+  ) into v_tiene_columnas;
+
+  if not v_tiene_columnas then
+    perform _p.anotar(58, 'El descuadre normal no alarma; el inexplicado si',
+      'casa_resumen devuelve pendiente_de_liquidar y descuadre_inexplicado',
+      false, 'casa_resumen NO tiene las columnas: la migracion 20261005100000 no esta aplicada');
+    return;
+  end if;
+
+  v_admin := _p.usuario('admin', 0, true);
+  v_u1    := _p.usuario('juan',  10000);
+  v_u2    := _p.usuario('pedro', 10000);
+  v_rem   := _p.escenario(3, 100);
+  v_h1 := _p.caballo(v_rem,1); v_h2 := _p.caballo(v_rem,2); v_h3 := _p.caballo(v_rem,3);
+
+  perform _p.actuar_como(v_u1); perform public.hacer_puja(v_rem, v_h1, 200, true);
+  perform _p.actuar_como(v_u2); perform public.hacer_puja(v_rem, v_h1, 300, true);
+  perform _p.actuar_como(v_u1); perform public.hacer_puja(v_rem, v_h2, 400, true);
+
+  -- ---------------- FASE 1: cerrado, sin liquidar ----------------
+  perform _p.actuar_como(v_admin);
+  perform public.cerrar_remate(v_rem);
+
+  select * into r from public.casa_resumen();
+  v_fase1 := r.descuadre <> 0
+         and r.pendiente_de_liquidar = -r.descuadre
+         and r.descuadre_inexplicado = 0
+         and r.remates_sin_liquidar = 1;
+  v_detalle := v_detalle || ' [1 cerrado] descuadre=' || r.descuadre::text ||
+               ' pendiente=' || r.pendiente_de_liquidar::text ||
+               ' inexplicado=' || r.descuadre_inexplicado::text ||
+               ' remates=' || r.remates_sin_liquidar::text;
+
+  -- ---------------- FASE 2: liquidado ----------------
+  perform public.set_ganador_carrera(v_rem, 2);
+  perform public.liquidar_remate(v_rem);
+
+  select * into r from public.casa_resumen();
+  v_fase2 := r.descuadre = 0
+         and r.pendiente_de_liquidar = 0
+         and r.descuadre_inexplicado = 0
+         and r.remates_sin_liquidar = 0;
+  v_detalle := v_detalle || ' | [2 liquidado] descuadre=' || r.descuadre::text ||
+               ' pendiente=' || r.pendiente_de_liquidar::text ||
+               ' inexplicado=' || r.descuadre_inexplicado::text;
+
+  -- ---------------- FASE 3: un saldo movido sin asiento ----------------
+  -- 500 Bs que aparecen en la cartera de un usuario sin que ningun remate ni
+  -- ninguna recarga los justifique. Es el fraude -- o el bug -- que la alarma
+  -- existe para cazar, y antes quedaba enterrado entre liquidaciones
+  -- pendientes.
+  select id into v_wallet from public.wallets where user_id = v_u1;
+  update public.wallets set saldo_disponible = saldo_disponible + 500 where id = v_wallet;
+  insert into public.wallet_movements (wallet_id, tipo, monto, descripcion)
+  values (v_wallet, 'ajuste_manual', 500, 'P58: movimiento sin asiento, a proposito');
+
+  select * into r from public.casa_resumen();
+  v_fase3 := r.descuadre_inexplicado = 500;
+  v_detalle := v_detalle || ' | [3 saldo a mano] descuadre=' || r.descuadre::text ||
+               ' inexplicado=' || r.descuadre_inexplicado::text || ' (esperado 500)';
+
+  perform _p.anotar(58, 'El descuadre normal no alarma; el inexplicado si',
+    'cerrado sin liquidar: descuadre != 0 pero inexplicado = 0; liquidado: todo a 0; saldo movido a mano: inexplicado = 500',
+    v_fase1 and v_fase2 and v_fase3,
+    'fase1=' || v_fase1::text || ' fase2=' || v_fase2::text || ' fase3=' || v_fase3::text || v_detalle);
+exception when others then
+  perform _p.anotar(58, 'El descuadre normal no alarma; el inexplicado si',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
 -- ---------------------------------------------------------------- resumen
 \set QUIET off
 select n as "#", nombre, esperado, estado, detalle from _p.resultado order by n;

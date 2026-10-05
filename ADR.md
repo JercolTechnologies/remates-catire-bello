@@ -366,3 +366,78 @@ Cualquier **otra** extensión que aparezca en `public` pone la prueba en rojo, e
 - Lo que de verdad protege producción no es el censo sino que no exista ningún `create extension` en `supabase/migrations`. Verificado el 01/10 y comprobable en un comando: `grep -ri "create extension" supabase/migrations/`.
 
 **Qué lo revertiría.** Que `concurrencia.sql` deje de necesitar `dblink` —dos procesos `psql` coordinados desde fuera de la base harían el mismo trabajo sin instalar nada— o que Supabase permita al rol `postgres` gestionar las extensiones que él mismo pidió crear. Lo primero está en nuestra mano y es la salida limpia el día que moleste.
+
+---
+
+## ADR-021 · Un parámetro opcional no puede significar «quítalo» y «no lo toques» a la vez
+
+**Fecha.** 02/10/2026
+
+**Contexto.** Jota pidió que la hora de apertura de un remate fuera opcional, como ya lo era la de cierre: *«que lo programen si quieren y si lo dejan vacío el remate queda activo apenas se cree»*.
+
+La base ya lo soportaba. `hacer_puja` compara contra la apertura con guarda de nulo (`if v_remate.opens_at is not null and now() < v_remate.opens_at`), la pantalla pública hace lo mismo, y el cierre automático solo mira los remates que tienen `closes_at`. Un remate sin apertura ya estaba activo desde su creación. Por ADR-015 —lo que es FE se queda en FE— el formulario de **crear** se arregla sin tocar la base.
+
+Buscando eso apareció un defecto que no era el que se buscaba. `editar_remate` decide si toca el horario con `p_opens_at is not null`. Con ese contrato **NULL significa «no lo cambies»**, así que una vez puesto un horario **no había forma de quitárselo desde la aplicación**: el admin borraba la hora de cierre, guardaba, no salía ningún error, y el cierre seguía ahí. La pantalla decía una cosa y la base guardaba otra, en silencio.
+
+No fue un descuido de la migración del 28/09. Con parámetros opcionales y un solo centinela, *«sin valor»* y *«quitar el valor»* son literalmente el mismo valor. No se puede distinguir desde dentro.
+
+**Decisión.** Una bandera explícita por campo: `p_limpiar_opens_at`, `p_limpiar_closes_at`. Tres caminos, y ninguno ambiguo:
+
+| entrada | efecto |
+|---|---|
+| `p_opens_at = null`, bandera `false` | no se toca |
+| `p_opens_at = valor` | se pone ese valor |
+| bandera `true` | queda en `NULL` |
+
+Si llegan las dos a la vez —valor y bandera— se **rechaza** en vez de adivinar cuál gana. Una orden contradictoria es un error del cliente, y tragárselo es cómo se vuelve a llegar al silencio del que venimos.
+
+**Dos detalles que no son adorno.**
+
+*El `drop` antes del `create`.* PostgREST resuelve las RPC por **nombre de argumento**. Añadir dos parámetros con `default` sin borrar la firma vieja deja dos funciones `editar_remate`, y la llamada de seis argumentos se vuelve ambigua (PGRST203). Es la misma piedra de `rechazar_recarga` y `procesar_retiro` del 01/10, y `create or replace` no la evita porque no borra la firma anterior.
+
+*El cuerpo no se retecleó.* Se generó a partir del archivo del 28/09 cambiando solo la firma, la guarda nueva y el bloque de horarios. En el primer intento sí lo escribí a mano y perdí por el camino el `pg_advisory_xact_lock(2, ...)`, cambié dos mensajes de error y me inventé un estado `'programado'` que no existe. Reescribir a mano un cuerpo que ya funciona es una forma barata de introducir defectos que nadie va a buscar ahí.
+
+**Consecuencias.**
+- `P57` mide las cinco cosas: que haya **una sola** firma, que `null` siga sin borrar, que la bandera borre apertura y cierre, que un remate sin apertura **se pueda pujar**, y que poner y quitar a la vez se rechace con `P0001`.
+- Las dos pantallas dejan de rellenar un horario vacío con `created_at` y medianoche. Media fecha es peor que ninguna: antes, elegir el día y olvidar la hora programaba el remate a las 00:00 sin avisar. Ahora se exige el par completo o nada, en los dos campos.
+- La regla general que queda: **cuando un parámetro opcional tenga que poder borrar, el borrado se pide aparte.** Vale para cualquier RPC de edición que venga después.
+
+**Qué lo revertiría.** Pasar a un contrato de parches explícitos —un `jsonb` con solo las claves que cambian— donde la ausencia de una clave y su valor `null` ya son cosas distintas sin necesidad de banderas. Es más limpio y más caro; hoy no lo paga nadie.
+
+---
+
+## ADR-022 · Una alarma que suena cuando no pasa nada no es una alarma
+
+**Fecha.** 05/10/2026
+
+**Contexto.** `/admin/contabilidad` llevaba días mostrando en ámbar: *«El libro no cuadra con los saldos. Diferencia de −1.380,00 Bs. Esto no debería pasar nunca: avisa antes de seguir operando.»*
+
+Perseguí ese número tres turnos. Primero dije que faltaba liquidar. Luego me retracté y dije que era un desfase fijo y antiguo, porque el descuadre no se había movido entre dos capturas. Luego me retracté de la retractación al hacer la aritmética: cerrar baja el descuadre en lo cobrado y liquidar lo sube en lo mismo, así que un ciclo cerrar+liquidar lo deja igual — mi "prueba" de que era fijo no probaba nada. Jota llegó a la respuesta buena mientras tanto, de memoria: *«tengo muchos remates cerrados mas no liquidados»*.
+
+Medido contra producción: **descuadre −1.380,00 y cobrado sin asentar 1.380,00**, al céntimo, con 8 remates cerrados sin liquidar. Reconstruidos desde `wallet_movements`, los saldos daban 6.370,00 exactos contra los 6.370,00 de `wallets`. **No faltaba un céntimo en ninguna parte.** La contabilidad estaba intacta. La alarma estaba mal.
+
+Y tenía que estarlo, porque la secuencia es así por diseño: **cerrar le cobra a los líderes, liquidar escribe el asiento.** Entre una cosa y la otra el libro va por detrás de los saldos. Un remate cerrado el viernes y liquidado el lunes tiene tres días de descuadre legítimo.
+
+**La decisión.** `casa_resumen()` devuelve dos columnas nuevas y la pantalla alarma con la segunda:
+
+```
+pendiente_de_liquidar = -SUMA(apuesta_cobro + apuesta_devolucion + premio)
+                        de los remates que aún no tienen asiento
+descuadre_inexplicado = descuadre + pendiente_de_liquidar
+```
+
+Es una **identidad**, no una aproximación. Desarrollando: `perdida_usuarios` es exactamente `resultados_asentados + pendiente_de_liquidar`, así que `descuadre = -pendiente_de_liquidar` y el inexplicado da cero. El desarrollo descansa en un supuesto que conviene ver escrito: que `ajuste_manual` solo se usa para devolver un retiro rechazado. **Si alguien mueve un saldo a mano por otro motivo, la identidad se rompe — y eso es exactamente lo que la alarma tiene que cazar.**
+
+El instrumento nuevo no es más permisivo: es más afilado. Antes, 500 Bs aparecidos de la nada se escondían dentro de un −1.380 que ya nadie miraba. Ahora salen con su nombre y su importe.
+
+**El riesgo de este tipo de arreglo, y cómo se evita.** Una implementación que devolviera `descuadre_inexplicado = 0` siempre habría apagado la alarma y pasado cualquier prueba que solo comprobara que se apaga. Por eso **P58 tiene tres fases**: cerrado sin liquidar (descuadre ≠ 0 pero inexplicado = 0), liquidado (todo a cero) y **un saldo movido a mano, donde el inexplicado tiene que valer exactamente ese importe**. La tercera es la que impide que esto sea cosmética. No se mide que la alarma se calle; se mide que siga sonando cuando toca.
+
+Verificado antes de entregarlo, en un Postgres 16.13 con un escenario que reproduce los números de producción al céntimo: devuelve descuadre −1.380,00, pendiente 1.380,00, inexplicado 0,00 y 8 remates; y metiendo un `ajuste_manual` de 500 sin respaldo, inexplicado 500,00.
+
+**Consecuencias.**
+- `descuadre` **se queda** en la función y en la pantalla. Deja de alarmar, no de mostrarse: borrar un número porque hay otro mejor es cómo se pierde la capacidad de comparar contra las capturas de la semana pasada.
+- Aparece un bloque gris, informativo: *«8 remates cerrados sin liquidar · 1.380,00 Bs pendientes de asentar»*. Informa sin asustar, y le dice al licenciatario qué tiene que hacer.
+- `drop function` antes del `create`: `create or replace` no puede cambiar el tipo de retorno (42P13).
+- La regla general: **antes de escribir una alarma, hay que saber decir en qué estado normal NO debe encenderse.** Si no se sabe, la alarma todavía no está diseñada.
+
+**Qué lo revertiría.** Que liquidar deje de ser un paso manual y ocurra dentro de la misma transacción que cierra. Entonces no habría ventana, el descuadre volvería a ser siempre anómalo y `descuadre_inexplicado` sería redundante. Hoy la ventana existe a propósito: entre cerrar y liquidar hay un humano mirando el resultado de la carrera.

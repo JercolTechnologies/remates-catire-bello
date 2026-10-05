@@ -366,10 +366,13 @@ export default function AdminRemateDetailPage() {
       if (rErr) throw new Error(rErr.message)
       const rem = r as RemateRow
       setRemate(rem)
-      const openTs = rem.opens_at || rem.created_at
-      const closeTs = rem.closes_at || rem.closed_at || rem.created_at
-      const openParts = toCaracasDateParts(openTs)
-      const closeParts = toCaracasDateParts(closeTs)
+      // Vacio si la base lo tiene vacio, EN LOS DOS CAMPOS.
+      // Antes caia en created_at para la fecha mientras la hora quedaba vacia,
+      // asi que un remate sin apertura se abria aqui con media fecha puesta y
+      // la pantalla exigia completarla. Ahora los dos horarios son opcionales
+      // y vacio significa vacio.
+      const openParts = toCaracasDateParts(rem.opens_at)
+      const closeParts = toCaracasDateParts(rem.closes_at)
       setRemateDraft({
         estado: rem.estado ?? "abierto",
         incremento_minimo: String(rem.incremento_minimo ?? ""),
@@ -579,11 +582,19 @@ export default function AdminRemateDetailPage() {
     const casa = n(remateDraft.porcentaje_casa)
     if (!(casa >= 0 && casa <= 100)) f.push("% de la casa (entre 0 y 100)")
 
-    // Apertura obligatoria, cierre OPCIONAL.
+    // LOS DOS HORARIOS SON OPCIONALES.
+    // Vacia la apertura, el remate esta activo desde que se creo. Vacio el
+    // cierre, se cierra a mano. Lo que no se admite es medio horario: la
+    // pantalla lo rellenaria con medianoche sin que nadie lo pidiera.
     const oDateISO = parseDateParts(remateDraft.opens_dd, remateDraft.opens_mm, remateDraft.opens_aa)
     const oTime24 = parseTime12hTo24(remateDraft.opens_time)
+    const hayAlgoDeApertura =
+      !!remateDraft.opens_dd.trim() || !!remateDraft.opens_mm.trim() ||
+      !!remateDraft.opens_aa.trim() || !!remateDraft.opens_time.trim()
     const o = oDateISO && oTime24 ? buildCaracasTs(oDateISO, oTime24) : null
-    if (!o) f.push("Fecha y hora de apertura del remate")
+    if (hayAlgoDeApertura && (!oDateISO || !oTime24)) {
+      f.push("La apertura está a medias: ponla completa o déjala vacía")
+    }
 
     const cDateISO = parseDateParts(remateDraft.closes_dd, remateDraft.closes_mm, remateDraft.closes_aa)
     const cTime24 = parseTime12hTo24(remateDraft.closes_time)
@@ -764,8 +775,15 @@ export default function AdminRemateDetailPage() {
         p_porcentaje_casa: n(remateDraft.porcentaje_casa),
         p_incremento_minimo: n(remateDraft.incremento_minimo),
         p_tipo: remateDraft.tipo || remate.tipo || "vivo",
+        // Tres caminos, y el tercero es nuevo (migracion 20261002100000).
+        // `p_opens_at: null` significaba "no lo cambies", asi que borrar la
+        // hora aqui no la borraba en la base y no salia ningun error: la
+        // pantalla decia una cosa y la base guardaba otra. Para quitarla hay
+        // que pedirlo con la bandera.
         p_opens_at: buildCaracasTs(opensDateISO, opensTime24),
         p_closes_at: buildCaracasTs(closesDateISO, closesTime24),
+        p_limpiar_opens_at: !buildCaracasTs(opensDateISO, opensTime24),
+        p_limpiar_closes_at: !buildCaracasTs(closesDateISO, closesTime24),
       })
       if (remErr) throw new Error(remErr.message)
 
@@ -1405,6 +1423,7 @@ export default function AdminRemateDetailPage() {
 
             <SelectorFechaHora
               etiqueta="Apertura del remate"
+              opcional
               valor={{
                 dd: remateDraft?.opens_dd ?? "",
                 mm: remateDraft?.opens_mm ?? "",
@@ -1418,7 +1437,7 @@ export default function AdminRemateDetailPage() {
                     : prev
                 )
               }
-              ayuda="Desde este momento se puede pujar."
+              ayuda="Déjalo vacío y el remate está activo desde que se creó."
             />
 
             <SelectorFechaHora

@@ -396,13 +396,25 @@ export default function AdminCrearRematePage() {
     const casa = n(porcentajeCasa)
     if (!(casa >= 0 && casa <= 100)) f.push("% de la casa (entre 0 y 100)")
 
-    // LA HORA DE APERTURA ES OBLIGATORIA; LA DE CIERRE NO.
-    // Antes `canSave` exigia las dos. No es lo que pidio Jota: "ese campo es
-    // opcional, un admin puede llenarlo o no porque el mismo cierra el remate
-    // manualmente cuando quiera". La base siempre admitio closes_at nulo.
+    // LAS DOS FECHAS SON OPCIONALES.
+    // Cierre: "un admin puede llenarlo o no porque el mismo cierra el remate
+    // manualmente cuando quiera". Apertura: "que lo programen si quieren y si
+    // lo dejan vacio el remate queda activo apenas se cree".
+    // La base ya admitia los dos nulos: `hacer_puja` solo compara contra
+    // opens_at `if v_remate.opens_at is not null`, y el cierre automatico solo
+    // mira los remates con closes_at. Esto es cambio de FRONTEND unicamente.
     const o = buildCaracasTs(opensDateISO, opensTime24)
     const c = buildCaracasTs(closesDateISO, closesTime24)
-    if (!o) f.push("Fecha y hora de apertura del remate")
+
+    // Media fecha es peor que ninguna: buildCaracasTs rellena la hora vacia con
+    // 00:00, asi que una fecha sin hora programaba el remate a medianoche sin
+    // que nadie lo hubiera pedido, y en silencio. Se exige el par completo o
+    // nada, en los dos campos.
+    if (opensDateISO && !opensTime24) f.push("Hora de apertura (ya elegiste la fecha)")
+    if (!opensDateISO && opensTime24) f.push("Fecha de apertura (ya elegiste la hora)")
+    if (closesDateISO && !closesTime24) f.push("Hora de cierre (ya elegiste la fecha)")
+    if (!closesDateISO && closesTime24) f.push("Fecha de cierre (ya elegiste la hora)")
+
     if (c && o && new Date(c).getTime() <= new Date(o).getTime()) {
       f.push("El cierre tiene que ser después de la apertura")
     }
@@ -935,6 +947,7 @@ export default function AdminCrearRematePage() {
 
             <SelectorFechaHora
               etiqueta="Apertura del remate"
+              opcional
               valor={{ dd: opensDD, mm: opensMM, aa: opensAA, hora12: opensTime }}
               onChange={(v) => {
                 setOpensDD(v.dd)
@@ -942,7 +955,7 @@ export default function AdminCrearRematePage() {
                 setOpensAA(v.aa)
                 setOpensTime(v.hora12)
               }}
-              ayuda="Desde este momento se puede pujar."
+              ayuda="Déjalo vacío y el remate queda activo apenas se cree."
             />
 
             <SelectorFechaHora
