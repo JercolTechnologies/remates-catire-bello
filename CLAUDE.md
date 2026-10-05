@@ -49,6 +49,7 @@ No leas todo. Lee lo que toca:
 | tocar permisos o RLS | ADR-018, ADR-020 y las pruebas P47/P48 del arnés |
 | tocar realtime | ADR-024, ADR-025, ADR-026 + `lib/realtime.ts` |
 | tocar contabilidad | ADR-022 + `supabase/migrations/20261005100000_descuadre_inexplicado.sql` |
+| dar de alta un licenciatario | `docs/supabase/INSTALACION_LICENCIATARIO.md` |
 | saber qué falta | `PENDIENTES_2026-10-01.md` y `BACKLOG_FASE1_FIXES.md` |
 
 `ADR.md` son 28 decisiones con su contexto, su alternativa descartada y qué las
@@ -85,6 +86,8 @@ tests/
   log.mjs             32 comprobaciones de /admin/log          (pnpm test:log)
 docs/supabase/
   COMO_APLICAR.md     el ciclo de migraciones. Leelo entero antes de la primera
+  INSTALACION_LICENCIATARIO.md  alta de una instalacion nueva. OJO: ahi NO va
+                      `migration repair` -- eso era para adoptar la base vieja
   reset_datos_prueba.sql   vaciar datos dejando el esquema
 ```
 

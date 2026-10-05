@@ -4,6 +4,7 @@
 |---|---|
 | `COMO_APLICAR.md` | **Empieza aquí.** Cómo se aplican las migraciones, local y producción, y la trampa del `migration repair` |
 | `COMO_HACER_EL_BASELINE.md` | Cómo se generó el volcado inicial y qué verificar si hay que rehacerlo |
+| `INSTALACION_LICENCIATARIO.md` | Dar de alta una instalación nueva, incluido el único paso manual: fundar su primer super admin |
 
 ## Reglas de `supabase/migrations/`
 
@@ -27,4 +28,14 @@ npx supabase stop     # apagarla y liberar RAM
 npx supabase db reset # borrar la base local y reaplicar TODAS las migraciones
 ```
 
-Siempre con `npx`: el CLI está instalado como dependencia del proyecto, no global.
+> **Corregido el 05/10/2026.** Aquí decía que el CLI estaba instalado como
+> dependencia del proyecto. **Es falso**, y `COMO_APLICAR.md` ya lo había
+> corregido el 25/09: `supabase` no está en `package.json` ni en el lock.
+> `npx` lo descarga del registro, así que **sin versión fijada cada máquina
+> corre el CLI que sea `latest` ese día**.
+>
+> Usa los scripts de `package.json`, que la fijan en 2.118.0:
+> `pnpm db:start`, `pnpm db:stop`, `pnpm db:reset`, `pnpm db:push:produccion`.
+>
+> Dos documentos que se contradicen son peores que uno solo: el que lee acaba
+> creyendo al equivocado.
