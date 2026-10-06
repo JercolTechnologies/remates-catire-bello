@@ -2745,11 +2745,13 @@ begin
       ('liquidar_remate',                 'auth'),
       ('listar_admins',                   'auth'),
       ('marcar_aviso_leido',              'auth'),
+      ('marcar_remates_vistos',          'auth'),
       ('listar_wallets_superadmin',       'auth'),
       ('mi_wallet_resumen',               'auth'),
       ('nombrar_admin',                   'auth'),
       ('procesar_retiro',                 'auth'),
       ('quitar_admin',                    'auth'),
+      ('remates_nuevos',                  'auth'),
       ('rechazar_recarga',                'auth'),
       ('registrar_movimiento_casa',       'auth'),
       ('retirar_caballo',                 'auth'),
@@ -4877,6 +4879,98 @@ begin
     case when v_msg = '' then '' else ' | ' || v_msg end);
 exception when others then
   perform _p.anotar(65, 'La casa no juega: ni puja, ni recarga, ni retira',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+-- ============================================================================
+--  P66 - "Nuevo" quiere decir nuevo PARA TI
+--
+--  Jota, probando el modal de crear remate: "no aviso en la cuenta cliente
+--  cuando lo cree". Decidimos indicador, no popup -- un remate nuevo es un
+--  anuncio, no algo que te pasa a ti, y con su flujo de crear las carreras del
+--  fin de semana un martes serian doce ventanas seguidas. Ver la migracion
+--  20261006120000.
+--
+--  LO QUE MIDE
+--   1. lo que ya estaba antes de TU marca no es novedad
+--   2. el contador es POR USUARIO: dos jugadores con marcas distintas ven
+--      numeros distintos sobre los mismos remates. Una prueba que mirara a uno
+--      solo pasaria aunque la marca fuera global, que es el defecto que esto
+--      existe para impedir.
+--   3. mirar la lista lo pone a cero, que es lo unico que impide que el numero
+--      crezca para siempre.
+--
+--  POR QUE LAS MARCAS SE MUEVEN A MANO Y NO SE USAN `pg_sleep` NI FECHAS
+--  FORZADAS EN LOS REMATES:
+--  `now()` en PostgreSQL es la hora de la TRANSACCION, no del reloj. Dentro de
+--  un bloque `do $$` todo comparte el mismo instante, asi que un remate creado
+--  "despues" de llamar a marcar_remates_vistos() tiene exactamente el mismo
+--  created_at que la marca, y `>` da falso. Dormir no arregla nada porque la
+--  hora no avanza.
+--
+--  Es la tercera vez que esta trampa muerde en este proyecto -- la primera fue
+--  P56 el 01/10. La forma de escribir una prueba que dependa del orden temporal
+--  es mover las marcas explicitamente, no esperar a que pase el tiempo.
+-- ============================================================================
+do $$
+declare
+  v_juan uuid; v_pedro uuid; v_rem uuid;
+  v_existe boolean;
+  v_juan_ve int; v_pedro_ve int; v_juan_tras_mirar int;
+  r record;
+  v_por_usuario boolean := false;
+  v_lo_anterior_no_cuenta boolean := false;
+  v_mirar_pone_a_cero boolean := false;
+begin
+  perform _p.limpiar();
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'remates_nuevos'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(66, 'Nuevo quiere decir nuevo para ti',
+      'remates_nuevos() y marcar_remates_vistos() existen y cuentan por usuario',
+      false, 'remates_nuevos NO EXISTE: la migracion 20261006120000 no esta aplicada');
+    return;
+  end if;
+
+  v_juan  := _p.usuario('juan', 1000);
+  v_pedro := _p.usuario('pedro', 1000);
+  v_rem   := _p.escenario(2, 100, 25);
+
+  -- Juan miro hace una hora: el remate aparecio despues, es nuevo para el.
+  -- Pedro mirara dentro de una hora: para el ya estaba.
+  update public.profiles set remates_vistos_at = now() - interval '1 hour' where id = v_juan;
+  update public.profiles set remates_vistos_at = now() + interval '1 hour' where id = v_pedro;
+
+  perform _p.actuar_como(v_juan);
+  select nuevos into v_juan_ve from public.remates_nuevos();
+
+  perform _p.actuar_como(v_pedro);
+  select nuevos into v_pedro_ve from public.remates_nuevos();
+
+  v_por_usuario := v_juan_ve = 1 and v_pedro_ve = 0;
+  v_lo_anterior_no_cuenta := v_pedro_ve = 0;
+
+  -- Juan abre la lista. Su marca pasa a ahora, y el remate deja de ser nuevo.
+  perform _p.actuar_como(v_juan);
+  perform public.marcar_remates_vistos();
+  select * into r from public.remates_nuevos();
+  v_juan_tras_mirar := r.nuevos;
+  v_mirar_pone_a_cero := r.nuevos = 0 and r.vistos_desde is not null;
+
+  perform _p.anotar(66, 'Nuevo quiere decir nuevo para ti',
+    'lo anterior a tu marca no cuenta; el contador es por usuario; mirar lo pone a cero',
+    v_por_usuario and v_lo_anterior_no_cuenta and v_mirar_pone_a_cero,
+    'juan_ve=' || v_juan_ve::text ||
+    ' pedro_ve=' || v_pedro_ve::text ||
+    ' juan_tras_mirar=' || v_juan_tras_mirar::text ||
+    ' marca_no_nula=' || (r.vistos_desde is not null)::text);
+exception when others then
+  perform _p.anotar(66, 'Nuevo quiere decir nuevo para ti',
     'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
 end $$;
 

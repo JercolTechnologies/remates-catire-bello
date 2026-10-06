@@ -34,7 +34,7 @@ const items: NavItem[] = [
   },
 ]
 
-export default function ClientBottomNav() {
+export default function ClientBottomNav({ nuevos = 0 }: { nuevos?: number }) {
   const pathname = usePathname()
 
   return (
@@ -51,6 +51,18 @@ export default function ClientBottomNav() {
               }`}
             >
               {item.label}
+              {/* El contador va SOLO en Remates, que es donde se resuelve.
+                  Un punto en un boton que no lleva a lo nuevo es una pista
+                  falsa. Desaparece al entrar en la lista. */}
+              {item.href === "/remates" && nuevos > 0 ? (
+                <span
+                  className={`ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full px-1 text-[10px] font-bold ${
+                    active ? "bg-zinc-900 text-amber-300" : "bg-amber-400 text-zinc-950"
+                  }`}
+                >
+                  {nuevos > 9 ? "9+" : nuevos}
+                </span>
+              ) : null}
             </Link>
           )
         })}

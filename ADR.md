@@ -794,3 +794,33 @@ Hasta ayer eso era raro pero inofensivo. Con la separación de funciones del ADR
 - La lección: **al cerrar una puerta, comprobar quién queda encerrado.** Es el ADR-018 —antes de cerrar una puerta, buscar quién la usa— aplicado al revés y aprendido dos semanas después.
 
 **Sobre el número del archivo.** El prefijo de una migración es una **clave de orden**, no una fecha: lo único que la base exige es que sea creciente. Yo trabajo en UTC y Jota en Colombia (UTC−5), con la aplicación en hora de Caracas (UTC−4), así que a partir de las 19:00 suyas yo ya estoy en el día siguiente. La migración anterior salió numerada `20261006` cuando allí todavía era 5. **No se renumera** —ya está aplicada en producción y renombrarla descuadraría `schema_migrations`— y de aquí en adelante la fecha real va escrita en la cabecera, en hora de Caracas.
+
+---
+
+## ADR-034 · Un aviso que se dispara de más destruye el valor de los que importan
+
+**Fecha.** 5 de octubre de 2026, 23:10 hora de Caracas *(migración `20261006120000`)*
+
+**Contexto.** Jota, probando el modal de confirmación: *«el detalle: no avisó en la cuenta cliente cuando lo creé»*. El remate aparecía solo en la lista —eso ya funcionaba desde el canal de la colección (ADR-031)— pero no había ningún aviso.
+
+La maquinaria para avisar existe desde el ADR-030 y añadir uno más es una línea. La pregunta era si debía ser un popup.
+
+**Decisión: indicador discreto, no popup.** El popup es para lo que te pasa **a ti** —ganaste un premio, te aprobaron la recarga, te rechazaron un retiro—. Un remate nuevo no es personal: es un anuncio, y los anuncios no interrumpen.
+
+Pero el argumento que decide es el flujo real que Jota describió el 01/10: *«un admin debería ponerse a crear todas las carreras del sábado y domingo el martes noche»*. Con un popup por remate, eso son **doce ventanas seguidas**. Y el jugador que aprende a cerrar ventanas sin leerlas cierra también, sin leer, la que le dice que ganó un premio.
+
+**Un aviso que se dispara de más no es ruido inofensivo: devalúa a los demás.** Es la misma lección del ADR-022 —la alarma de contabilidad que saltaba cuando no pasaba nada— en el lado del jugador.
+
+**Cómo se sabe qué es nuevo: una marca por usuario**, `profiles.remates_vistos_at`. Todo remate abierto creado después es nuevo para él; abrir la lista mueve la marca.
+
+Se eligió una marca y no una tabla `remates_vistos (user_id, remate_id)`: la tabla sabría cuáles abrió uno por uno, a cambio de una fila por jugador y por remate, para responder una pregunta que nadie hace. Lo que el jugador quiere saber es *«qué hay desde la última vez que miré»*, y eso es una fecha.
+
+**Y va en la base, no en `localStorage`.** Habría salido gratis, pero quien mira en el teléfono y luego en la computadora vería los mismos remates marcados como nuevos otra vez. La marca es del usuario, no del aparato.
+
+**La marca nace puesta, y eso no es un detalle.** La primera versión la dejaba nula para quien nunca había mirado, y eso obligaba a elegir entre dos respuestas, las dos malas: *nulo = todo es nuevo* llena la pantalla del recién llegado de etiquetas y le enseña a ignorarlas; *nulo = nada es nuevo* deja sin aviso para siempre a quien se registró y no abrió la lista, justo el que habría que atraer. Con `not null default now()` el caso no existe.
+
+**Una sola suscripción para los tres consumidores.** La lista pública, el contador del menú y la lista del admin necesitan el mismo canal. `RematesEnVivo` en el layout raíz lo escucha una vez y reparte `version`; tres suscripciones al mismo tópico serían tres canales y tres versiones de la misma verdad. ADR-026 aplicado antes de repetir el error.
+
+**Consecuencias.** `P66` mide que lo anterior a tu marca no cuenta, que el contador es **por usuario** —una prueba que mirara a uno solo pasaría aunque la marca fuera global— y que mirar lo pone a cero.
+
+**Y una trampa que mordió por tercera vez.** `now()` en PostgreSQL es la hora de la **transacción**, no del reloj: dentro de un `do $$` todo comparte instante, así que un remate creado «después» de marcar tiene el mismo `created_at` que la marca y `>` da falso. Dormir no arregla nada porque la hora no avanza. Ya había pasado en P56 el 01/10 y en P61 anteayer. **La forma de escribir una prueba que dependa del orden temporal es mover las marcas explícitamente, nunca esperar a que pase el tiempo.**

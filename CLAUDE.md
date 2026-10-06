@@ -54,7 +54,7 @@ No leas todo. Lee lo que toca:
 | dar de alta un licenciatario | `docs/supabase/INSTALACION_LICENCIATARIO.md` |
 | saber qué falta | `PENDIENTES_2026-10-05.md` (el 10-01 es histórico) y `BACKLOG_FASE1_FIXES.md` |
 
-`ADR.md` son 33 decisiones con su contexto, su alternativa descartada y qué las
+`ADR.md` son 34 decisiones con su contexto, su alternativa descartada y qué las
 revertiría. **Casi siempre la pregunta que te estás haciendo ya está contestada ahí.**
 Si tomas una decisión de arquitectura nueva, añade su ADR al final.
 
@@ -82,7 +82,7 @@ supabase/
   migrations/         30 archivos. El 00000000000000 es el baseline sacado de produccion
   snippets/           consultas de diagnostico para el SQL Editor del panel
 tests/
-  pruebas_dinero.sql  65 pruebas. UNA conexion. Es el juez.
+  pruebas_dinero.sql  66 pruebas. UNA conexion. Es el juez.
   concurrencia.sql    4 pruebas de carreras. Necesita que el arnes haya corrido antes
   fechas.mjs          31 comprobaciones de SelectorFechaHora  (pnpm test:fechas)
   log.mjs             32 comprobaciones de /admin/log          (pnpm test:log)
@@ -106,7 +106,7 @@ docs/supabase/
    Numérala con la hora de **Caracas** (`TZ=America/Caracas date`), no con la del
    entorno: tu reloj puede ir en UTC y adelantar un día respecto a Jota, que está
    en Colombia. Y escribe la fecha real, en hora de Caracas, en la cabecera.
-2. Jota corre `pnpm db:reset` + el arnés en local. **Marcador esperado: 65/65 y 4/4.**
+2. Jota corre `pnpm db:reset` + el arnés en local. **Marcador esperado: 66/66 y 4/4.**
 3. Jota hace respaldo y `pnpm db:push:produccion`.
 4. **Comprobar que llegó**, antes de desplegar nada:
    `select version from supabase_migrations.schema_migrations order by version desc limit 5;`
@@ -133,7 +133,13 @@ Cambio solo de frontend: pasos 1–4 no aplican, pero el typecheck sí.
 - **Un instrumento que miente es peor que no tenerlo.** Una alarma que salta cuando no
   pasa nada (ADR-022), un canal que se cayó y parece vivo (ADR-025), un botón sin acuse
   de recibo (ADR-023). Si lo construyes, tiene que decir la verdad sobre su propio estado.
-- Antes de cerrar una puerta, busca quién la usa (ADR-018).
+- Antes de cerrar una puerta, busca quién la usa (ADR-018) **y comprueba quién
+  queda encerrado** (ADR-033).
+- **`now()` es la hora de la TRANSACCIÓN, no del reloj.** Dentro de un `do $$`
+  todo comparte instante: dos filas creadas «una después de otra» tienen el mismo
+  `created_at`, y `order by created_at` o `>` no distinguen. Ha mordido tres
+  veces (P56, P61, P66). En una prueba que dependa del orden temporal, mueve las
+  fechas explícitamente; `pg_sleep` no sirve porque la hora no avanza.
 
 ## 6. Lo que NO se hace
 

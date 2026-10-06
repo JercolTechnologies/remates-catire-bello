@@ -43,6 +43,7 @@ import { useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ClientBottomNav from "./ClientBottomNav"
+import { useRematesEnVivo } from "./RematesEnVivo"
 
 // Donde el menu de cliente no pinta nada.
 const FUERA = ["/admin", "/login", "/register", "/auth", "/panel", "/api"]
@@ -51,6 +52,7 @@ export default function NavegacionCliente() {
   const pathname = usePathname()
   const [haySesion, setHaySesion] = useState(false)
   const [esAdmin, setEsAdmin] = useState(false)
+  const { nuevos } = useRematesEnVivo()
 
   useEffect(() => {
     let vivo = true
@@ -91,7 +93,7 @@ export default function NavegacionCliente() {
 
   return (
     <>
-      <ClientBottomNav />
+      <ClientBottomNav nuevos={nuevos} />
       {/* El hueco que deja la barra, que es `fixed` y no ocupa sitio en el
           flujo. Va aqui y no como `pb-24` en cada pantalla: una pantalla nueva
           que se olvide del padding acaba con el ultimo boton tapado. */}

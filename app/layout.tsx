@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AvisosDelUsuario from "./components/AvisosDelUsuario";
 import NavegacionCliente from "./components/NavegacionCliente";
+import { RematesEnVivo } from "./components/RematesEnVivo";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,6 +34,10 @@ export default function RootLayout({
             Un aviso que solo existe en la pantalla que lo muestra no es un
             aviso (ADR-026). Sin sesion no pinta ni consulta nada. */}
         <AvisosDelUsuario />
+        {/* Y una sola suscripcion al canal de la coleccion de remates, que
+            alimenta la lista publica, el contador del menu y la lista del
+            admin. Ver components/RematesEnVivo.tsx */}
+        <RematesEnVivo>
         <div className="min-h-screen flex flex-col">
           <div className="flex-1">{children}</div>
           <footer className="py-4 text-center text-xs text-zinc-400">
@@ -42,6 +47,7 @@ export default function RootLayout({
               el solo si toca pintarlo. Ver components/NavegacionCliente.tsx */}
           <NavegacionCliente />
         </div>
+        </RematesEnVivo>
       </body>
     </html>
   );

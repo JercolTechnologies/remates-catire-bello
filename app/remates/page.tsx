@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { CornerLogo } from "@/app/components/BrandLogo"
-import { useSenal, TOPICO_LISTA, EVENTOS_LISTA } from "@/lib/realtime"
+import { useRematesEnVivo } from "@/app/components/RematesEnVivo"
 
 type RemateRow = {
   id: string
@@ -69,13 +69,31 @@ export default function RematesPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [authReady, setAuthReady] = useState(false)
 
-  // EN VIVO. Un remate nuevo entra solo en esta lista.
-  // Sube con cada senal del canal de la coleccion; el efecto de abajo depende
-  // de ella. Ver la migracion 20261005160000 y el ADR-026: el patron es el
-  // mismo que en el panel de admin -- la pantalla no se suscribe a nada, solo
-  // reacciona a un numero que cambia.
-  const [version, setVersion] = useState(0)
-  useSenal(TOPICO_LISTA, EVENTOS_LISTA, () => setVersion((v) => v + 1))
+  // EN VIVO, pero sin suscribirse: el canal de la coleccion lo escucha una sola
+  // vez el layout raiz (components/RematesEnVivo.tsx) y reparte `version`. Tres
+  // pantallas suscritas al mismo topico serian tres canales y tres versiones de
+  // la misma verdad -- el defecto que corrigio el ADR-026.
+  const { version, vistosDesde, marcarVistos } = useRematesEnVivo()
+
+  // Mirar la lista es haberla visto. Se marca al entrar, no al salir: si el
+  // jugador cierra la pestana, lo que vio ya lo vio.
+  useEffect(() => {
+    void marcarVistos()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // "Nuevo" = creado despues de la ULTIMA VEZ que este jugador miro la lista.
+  // `vistosDesde` es la marca ANTERIOR, no la de ahora: si se usara la nueva,
+  // marcar como vistos al entrar borraria las etiquetas en el mismo instante en
+  // que el jugador las iba a leer.
+  //
+  // Nunca ha mirado la lista (`vistosDesde` nulo) -> no se marca nada. Un
+  // jugador que entra por primera vez y ve TODO en amarillo no esta recibiendo
+  // informacion, esta recibiendo ruido.
+  function esNuevo(creadoEn: string | null | undefined) {
+    if (!vistosDesde || !creadoEn) return false
+    return new Date(creadoEn).getTime() > new Date(vistosDesde).getTime()
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -228,7 +246,14 @@ export default function RematesPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-base font-semibold">{race?.nombre || "Carrera"}</div>
+                      <div className="flex items-center gap-2">
+                        {esNuevo(r.created_at) ? (
+                          <span className="rounded-md bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-300 ring-1 ring-amber-400/40">
+                            Nuevo
+                          </span>
+                        ) : null}
+                        <div className="text-base font-semibold">{race?.nombre || "Carrera"}</div>
+                      </div>
                       <div className="mt-1 text-xs text-zinc-400">
                         {race ? (
                           <>

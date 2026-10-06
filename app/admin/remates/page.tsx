@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { useSenal, TOPICO_LISTA, EVENTOS_LISTA } from "@/lib/realtime"
+import { useRematesEnVivo } from "@/app/components/RematesEnVivo"
 
 type RemateRow = {
   id: string
@@ -251,11 +251,14 @@ export default function AdminRematesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // EN VIVO. Mismo canal de coleccion que la lista publica: si otro admin crea
-  // o cierra un remate, esta pantalla se entera sin recargar.
-  useSenal(TOPICO_LISTA, EVENTOS_LISTA, () => {
-    void loadRemates(true)
-  })
+  // EN VIVO, desde el contexto: la suscripcion al canal de la coleccion vive en
+  // el layout raiz y es UNA para toda la aplicacion. `version > 0` evita una
+  // segunda consulta inutil al montar.
+  const { version } = useRematesEnVivo()
+  useEffect(() => {
+    if (version > 0) void loadRemates(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version])
 
   const topByHorse = useMemo(() => {
     // mayor monto; empate -> el más viejo (created_at asc) gana
