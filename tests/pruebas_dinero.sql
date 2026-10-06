@@ -4271,8 +4271,22 @@ declare
 begin
   perform _p.limpiar();
 
+  --  EL ESCENARIO CAMBIO EL 05/10, Y EL CAMBIO ES PARTE DE LA PRUEBA.
+  --
+  --  Antes, `admin_b` nacia admin y pedia su propio retiro. Desde la migracion
+  --  20261006110000 un admin NO PUEDE pedir recargas ni retiros (P65), asi que
+  --  ese escenario ya no existe.
+  --
+  --  Pero el riesgo si existe, y por otro camino: alguien pide su retiro siendo
+  --  jugador normal y LO ASCIENDEN A ADMIN despues. Sus solicitudes viejas
+  --  siguen vivas -- mismo criterio que 20260930110000 con las pujas: no se
+  --  anula dinero ya comprometido por un cambio de rol -- y ahi es donde la
+  --  guarda del ADR-028 tiene que seguir de pie.
+  --
+  --  Asi que `admin_b` nace jugador, pide, y se le asciende. Mas realista que
+  --  el escenario anterior, no menos.
   v_admin_a := _p.usuario('admin_a', 0, true);
-  v_admin_b := _p.usuario('admin_b', 2000, true);
+  v_admin_b := _p.usuario('admin_b', 2000);   -- jugador, de momento
 
   select id into v_wallet from public.wallets where user_id = v_admin_b;
 
@@ -4286,6 +4300,16 @@ begin
     v_admin_b, 50000, 'pago_movil', '04120000000', 'P60', current_date,
     'pendiente'::deposit_status)
   returning id into v_dep;
+
+  --  Pide el retiro SIENDO JUGADOR, que es cuando se puede.
+  perform _p.actuar_como(v_admin_b);
+  perform public.solicitar_retiro(100, 'pago_movil', '04120000000');
+  select id into v_ret from public.withdraw_requests
+  where user_id = v_admin_b and estado = 'pendiente'::withdraw_status
+  order by monto desc limit 1;
+
+  --  Y AHORA lo ascienden. Sus dos solicitudes siguen vivas.
+  update public.profiles set es_admin = true where id = v_admin_b;
 
   perform _p.actuar_como(v_admin_b);
 
@@ -4316,12 +4340,7 @@ begin
       v_msg := v_msg || ' rechazo propio reboto con ' || sqlstate || ';';
   end;
 
-  -- 3) ni se paga su propio retiro
-  perform public.solicitar_retiro(100, 'pago_movil', '04120000000');
-  select id into v_ret from public.withdraw_requests
-  where user_id = v_admin_b and estado = 'pendiente'::withdraw_status
-  order by monto desc limit 1;
-
+  -- 3) ni se paga el retiro que habia pedido antes de ser admin
   begin
     perform public.procesar_retiro(v_ret, 'pagado'::withdraw_status, null, null);
     v_msg := v_msg || ' se pago su propio retiro (MAL);';
@@ -4748,6 +4767,116 @@ begin
     ' dice_que_volvio=' || v_dice_que_volvio::text || v_detalle);
 exception when others then
   perform _p.anotar(64, 'La caja avisa al cliente',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+-- ============================================================================
+--  P65 - La casa no juega: ni puja, ni recarga, ni retira
+--
+--  LA TRAMPA QUE CERRO ESTA MIGRACION
+--  "Los admins no participan en remates" vive en la base desde el 30/09, pero
+--  solo para `hacer_puja`. `solicitar_recarga` y `solicitar_retiro` no miraban
+--  el rol.
+--
+--  Hasta el 05/10 eso era raro pero inofensivo. Con la separacion de funciones
+--  del ADR-028 se volvio una trampa sin salida:
+--
+--    1. el admin pide un retiro
+--    2. solicitar_retiro LE DESCUENTA EL SALDO en el acto
+--    3. nadie puede procesarlo: el mismo no (ADR-028), y si es el unico admin
+--       de la instalacion, no hay nadie mas
+--    4. queda pendiente para siempre, con el dinero descontado, y casa_resumen
+--       lo cuenta como obligacion de la casa a perpetuidad
+--
+--  Lo encontro Jota preguntando por que el menu de cliente le ensenaba
+--  "Recargar" y "Retirar" a un admin. Una pregunta de interfaz que destapo un
+--  defecto de dinero.
+--
+--  LA TERCERA COMPROBACION ES LA QUE IMPORTA: que un usuario normal SI pueda.
+--  Una guarda que ademas bloquea la operacion legitima no es una guarda, es una
+--  averia.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid; v_juan uuid; v_dep uuid;
+  v_admin_no_recarga boolean := false;
+  v_admin_no_retira boolean := false;
+  v_usuario_si_recarga boolean := false;
+  v_usuario_si_retira boolean := false;
+  v_saldo_intacto boolean := false;
+  v_saldo_antes numeric;
+  v_msg text := '';
+begin
+  perform _p.limpiar();
+
+  v_admin := _p.usuario('admin', 5000, true);
+  v_juan  := _p.usuario('juan',  5000);
+
+  -- Baja el requisito de apuesta: aqui se mide el ROL, no la regla del 50%.
+  if to_regclass('public.ajustes_instalacion') is not null then
+    update public.ajustes_instalacion set valor = '0' where clave = 'pct_apostado_para_retirar';
+  end if;
+
+  v_saldo_antes := _p.saldo(v_admin);
+
+  -- 1) el admin no puede pedir una recarga
+  perform _p.actuar_como(v_admin);
+  begin
+    perform public.solicitar_recarga(500, 'pago_movil', '04120000000', 'P65', current_date);
+    v_msg := v_msg || ' el admin pidio una recarga (MAL);';
+  exception when sqlstate 'P0001' then
+    if sqlerrm like '%administrador no puede%' then
+      v_admin_no_recarga := true;
+    else
+      v_msg := v_msg || ' reboto por otro motivo: ' || sqlerrm || ';';
+    end if;
+  end;
+
+  -- 2) ni un retiro... y sobre todo, SIN QUE LE TOQUEN EL SALDO.
+  --    Esto es lo que convertia el defecto en trampa: el descuento ocurria
+  --    antes de que nadie pudiera procesar nada.
+  begin
+    perform public.solicitar_retiro(100, 'pago_movil', '04120000000');
+    v_msg := v_msg || ' el admin pidio un retiro (MAL);';
+  exception when sqlstate 'P0001' then
+    if sqlerrm like '%administrador no puede%' then
+      v_admin_no_retira := true;
+    else
+      v_msg := v_msg || ' el retiro reboto por otro motivo: ' || sqlerrm || ';';
+    end if;
+  end;
+
+  v_saldo_intacto := _p.saldo(v_admin) = v_saldo_antes;
+
+  -- 3) un usuario normal SI puede las dos cosas
+  perform _p.actuar_como(v_juan);
+  begin
+    perform public.solicitar_recarga(500, 'pago_movil', '04120000000', 'P65-J', current_date);
+    v_usuario_si_recarga := true;
+  exception when others then
+    v_msg := v_msg || ' un usuario normal NO pudo recargar (' || sqlstate || '): ' || sqlerrm || ';';
+  end;
+
+  begin
+    perform public.solicitar_retiro(100, 'pago_movil', '04120000000');
+    v_usuario_si_retira := true;
+  exception when others then
+    v_msg := v_msg || ' un usuario normal NO pudo retirar (' || sqlstate || '): ' || sqlerrm || ';';
+  end;
+
+  perform _p.anotar(65, 'La casa no juega: ni puja, ni recarga, ni retira',
+    'un admin no puede pedir recarga ni retiro y su saldo no se toca; un usuario normal si puede las dos cosas',
+    v_admin_no_recarga and v_admin_no_retira and v_saldo_intacto
+      and v_usuario_si_recarga and v_usuario_si_retira,
+    'admin_no_recarga=' || v_admin_no_recarga::text ||
+    ' admin_no_retira=' || v_admin_no_retira::text ||
+    ' saldo_del_admin_intacto=' || v_saldo_intacto::text ||
+    ' usuario_si_recarga=' || v_usuario_si_recarga::text ||
+    ' usuario_si_retira=' || v_usuario_si_retira::text ||
+    case when v_msg = '' then '' else ' | ' || v_msg end);
+exception when others then
+  perform _p.anotar(65, 'La casa no juega: ni puja, ni recarga, ni retira',
     'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
 end $$;
 

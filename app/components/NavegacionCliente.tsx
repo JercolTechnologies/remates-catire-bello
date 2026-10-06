@@ -21,10 +21,18 @@
 // (ADR-026) y el popup de avisos al usuario (ADR-030). Lo que vale para toda la
 // aplicacion vive POR ENCIMA de las pantallas, no dentro de una.
 //
-// LA REGLA, AHORA UNA SOLA: se ve en las rutas de cliente, con sesion iniciada.
-// Los admins TAMBIEN lo ven -- tienen cartera y pueden recargar y retirar como
-// cualquiera. Era el comportamiento de cuatro de las seis pantallas; esto
-// unifica hacia donde ya estaba la mayoria, no inventa uno nuevo.
+// LA REGLA, AHORA UNA SOLA: se ve en las rutas de cliente, con sesion iniciada,
+// y NO siendo administrador.
+//
+// CORREGIDO EL 05/10 POR LA TARDE. La primera version se lo ensenaba tambien a
+// los admins, con el argumento de que "tienen cartera como cualquiera". Jota
+// pregunto si eso no contradecia la regla de que un admin no puede pujar, y
+// tenia razon: la casa no juega, y tampoco usa la cartera de jugador. Peor
+// todavia, ensenarle "Recargar" y "Retirar" a un admin le ofrecia dos
+// operaciones que desde la migracion 20261006110000 la base le rechaza.
+//
+// Unificar hacia la mayoria era un mal criterio: cuatro pantallas hacian una
+// cosa y dos hacian la correcta.
 //
 // LAS RUTAS SE DECLARAN POR LO QUE NO SON. Una lista blanca habria que ampliarla
 // con cada pantalla nueva, y la siguiente volveria a nacer sin menu -- que es el
@@ -42,6 +50,7 @@ const FUERA = ["/admin", "/login", "/register", "/auth", "/panel", "/api"]
 export default function NavegacionCliente() {
   const pathname = usePathname()
   const [haySesion, setHaySesion] = useState(false)
+  const [esAdmin, setEsAdmin] = useState(false)
 
   useEffect(() => {
     let vivo = true
@@ -49,7 +58,20 @@ export default function NavegacionCliente() {
     async function mirar() {
       const { data } = await supabase.auth.getUser()
       if (!vivo) return
-      setHaySesion(!!data?.user)
+      const u = data?.user ?? null
+      setHaySesion(!!u)
+
+      if (!u) {
+        setEsAdmin(false)
+        return
+      }
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("es_admin,es_super_admin")
+        .eq("id", u.id)
+        .maybeSingle()
+      if (!vivo) return
+      setEsAdmin(!!(prof?.es_admin || prof?.es_super_admin))
     }
 
     void mirar()
@@ -65,7 +87,7 @@ export default function NavegacionCliente() {
   const esPortada = pathname === "/"
   const esDeAdminOAuth = FUERA.some((p) => pathname === p || pathname.startsWith(p + "/"))
 
-  if (!haySesion || esPortada || esDeAdminOAuth) return null
+  if (!haySesion || esAdmin || esPortada || esDeAdminOAuth) return null
 
   return (
     <>

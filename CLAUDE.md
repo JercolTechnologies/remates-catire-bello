@@ -31,7 +31,9 @@ Estas no se negocian ni se interpretan. Si una te estorba, dilo y para; no la ro
 6. **Comentarios y mensajes en castellano**, y explicando **por qué**, no qué.
    Un comentario que repite el código sobra; uno que cuenta qué pasó cuando no estaba,
    vale su peso.
-7. **No asumas lo que no sabes. Pregunta.** Sobre todo mientras iteráis.
+7. **No asumas lo que no sabes. Pregunta.** Sobre todo mientras iteráis. Y
+   **comprueba las fechas con un comando**, nunca de memoria: trabajas en UTC y
+   Jota en Colombia (UTC−5), con la app en hora de Caracas (UTC−4).
 8. **Si te equivocas, dilo claro y pronto.** Y si tienes argumentos, defiende tu
    posición: Jota no quiere que le den la razón por cortesía.
 
@@ -52,7 +54,7 @@ No leas todo. Lee lo que toca:
 | dar de alta un licenciatario | `docs/supabase/INSTALACION_LICENCIATARIO.md` |
 | saber qué falta | `PENDIENTES_2026-10-05.md` (el 10-01 es histórico) y `BACKLOG_FASE1_FIXES.md` |
 
-`ADR.md` son 32 decisiones con su contexto, su alternativa descartada y qué las
+`ADR.md` son 33 decisiones con su contexto, su alternativa descartada y qué las
 revertiría. **Casi siempre la pregunta que te estás haciendo ya está contestada ahí.**
 Si tomas una decisión de arquitectura nueva, añade su ADR al final.
 
@@ -80,7 +82,7 @@ supabase/
   migrations/         30 archivos. El 00000000000000 es el baseline sacado de produccion
   snippets/           consultas de diagnostico para el SQL Editor del panel
 tests/
-  pruebas_dinero.sql  64 pruebas. UNA conexion. Es el juez.
+  pruebas_dinero.sql  65 pruebas. UNA conexion. Es el juez.
   concurrencia.sql    4 pruebas de carreras. Necesita que el arnes haya corrido antes
   fechas.mjs          31 comprobaciones de SelectorFechaHora  (pnpm test:fechas)
   log.mjs             32 comprobaciones de /admin/log          (pnpm test:log)
@@ -100,7 +102,11 @@ docs/supabase/
 ## 4. El ciclo, en orden, sin saltarse pasos
 
 1. Escribir la migración (nueva, nunca editar una ya aplicada: no se vuelve a ejecutar).
-2. Jota corre `pnpm db:reset` + el arnés en local. **Marcador esperado: 64/64 y 4/4.**
+   **El prefijo es una clave de orden, no una fecha: solo tiene que ser creciente.**
+   Numérala con la hora de **Caracas** (`TZ=America/Caracas date`), no con la del
+   entorno: tu reloj puede ir en UTC y adelantar un día respecto a Jota, que está
+   en Colombia. Y escribe la fecha real, en hora de Caracas, en la cabecera.
+2. Jota corre `pnpm db:reset` + el arnés en local. **Marcador esperado: 65/65 y 4/4.**
 3. Jota hace respaldo y `pnpm db:push:produccion`.
 4. **Comprobar que llegó**, antes de desplegar nada:
    `select version from supabase_migrations.schema_migrations order by version desc limit 5;`

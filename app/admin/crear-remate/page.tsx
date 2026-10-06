@@ -500,6 +500,36 @@ export default function AdminCrearRematePage() {
 
   const canSave = faltantes.length === 0
 
+  // CONFIRMACION ANTES DE CREAR.
+  //
+  // Pedido por Jota el 01/10: los tres numeros de dinero a la vista antes de
+  // escribir nada. La razon es que crear un remate NO es reversible de forma
+  // limpia: una vez abierto, la gente puja, y cambiar el incremento o el
+  // porcentaje despues deja avisos al jugador (migracion 20260928110000) o
+  // directamente no se puede si ya hay pujas. El momento de leer los numeros
+  // es ANTES, no cuando ya hay dinero encima.
+  //
+  // Y hay un segundo motivo, que es el que de verdad muerde: el formulario
+  // arranca con valores por defecto -- "Carrera de Prueba", "La Rinconada",
+  // incremento 50, casa 25%. Crear un remate real sin haber mirado esos
+  // campos es facilisimo, y es un error que no se nota hasta que un jugador
+  // pregunta por que la carrera se llama "Carrera de Prueba".
+  const [confirmando, setConfirmando] = useState(false)
+
+  // El pozo minimo: lo que entraria si nadie pujara por ningun caballo, que es
+  // el suelo garantizado del remate. No es una prediccion, es una cota.
+  const resumen = useMemo(() => {
+    const pozoMinimo = horses.reduce((acc, h) => acc + n(h.precio_salida), 0)
+    const casa = n(porcentajeCasa)
+    return {
+      pozoMinimo,
+      casa,
+      comisionMinima: Math.round(pozoMinimo * (casa / 100) * 100) / 100,
+      premioMinimo: Math.round(pozoMinimo * ((100 - casa) / 100) * 100) / 100,
+      conEscalera: horses.filter((h) => horseRulesEnabled[h.tempId]).length,
+    }
+  }, [horses, porcentajeCasa, horseRulesEnabled])
+
   function addHorse() {
     const nextNum =
       horses.length > 0
@@ -1380,12 +1410,126 @@ export default function AdminCrearRematePage() {
         ) : null}
 
         <button
-          onClick={() => void onCreate()}
+          onClick={() => setConfirmando(true)}
           disabled={!canSave || saving || !!createdRemateId}
           className="mt-4 w-full rounded-xl bg-white text-zinc-950 font-semibold py-3 disabled:opacity-60"
         >
-          {createdRemateId ? "Remate creado" : saving ? "Creando..." : "Crear remate"}
+          {createdRemateId ? "Remate creado" : saving ? "Creando..." : "Revisar y crear"}
         </button>
+
+        {/* ---------------------------------------------------------------
+            EL REPASO ANTES DE CREAR
+
+            No es un "¿estás seguro?". Un cuadro que solo pregunta eso se
+            responde que sí sin leerlo, y entonces no sirve para nada: lo
+            unico que aporta es un clic mas.
+
+            Este ENSEÑA lo que no se puede deshacer -- el nombre que va a ver
+            el jugador, el incremento, el porcentaje de la casa y el pozo
+            minimo -- porque el error tipico no es crear sin querer, es crear
+            con los valores por defecto sin haberlos mirado.
+            --------------------------------------------------------------- */}
+        {confirmando ? (
+          <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 p-4 sm:items-center">
+            <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+              <div className="text-lg font-bold text-zinc-50">Revisa antes de crear</div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Una vez abierto, la gente puja. El incremento y el porcentaje de la casa ya no se
+                pueden cambiar sin avisar a los jugadores, y con pujas hechas no se pueden cambiar.
+              </p>
+
+              <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="text-xs text-zinc-500">Lo que verá el jugador</div>
+                <div className="mt-1 text-sm font-semibold text-zinc-100">
+                  {raceDescripcion.trim() || "(sin descripción)"}
+                </div>
+                <div className="text-xs text-zinc-400">
+                  {raceHipodromo.trim()} · carrera {raceNumeroCarreraText.trim()} ·{" "}
+                  {raceDia.trim()} {raceFechaDD}/{raceFechaMM}/{raceFechaAA} {raceHora}
+                </div>
+              </div>
+
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                  <div className="text-[11px] text-zinc-500">Incremento</div>
+                  <div className="mt-1 text-base font-semibold text-zinc-100">
+                    {formatoBs(n(incrementoMinimo))}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                  <div className="text-[11px] text-zinc-500">Casa</div>
+                  <div className="mt-1 text-base font-semibold text-zinc-100">{resumen.casa}%</div>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                  <div className="text-[11px] text-zinc-500">Caballos</div>
+                  <div className="mt-1 text-base font-semibold text-zinc-100">{horses.length}</div>
+                </div>
+              </div>
+
+              <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="text-xs text-zinc-500">
+                  Si nadie pujara por ningún caballo (el suelo del remate)
+                </div>
+                <div className="mt-2 flex items-baseline justify-between">
+                  <span className="text-sm text-zinc-300">Pozo</span>
+                  <span className="text-sm font-semibold tabular-nums text-zinc-100">
+                    {formatoBs(resumen.pozoMinimo)} Bs
+                  </span>
+                </div>
+                <div className="mt-1 flex items-baseline justify-between">
+                  <span className="text-sm text-zinc-300">Se queda la casa</span>
+                  <span className="text-sm font-semibold tabular-nums text-emerald-300">
+                    {formatoBs(resumen.comisionMinima)} Bs
+                  </span>
+                </div>
+                <div className="mt-1 flex items-baseline justify-between">
+                  <span className="text-sm text-zinc-300">Premio</span>
+                  <span className="text-sm font-semibold tabular-nums text-zinc-100">
+                    {formatoBs(resumen.premioMinimo)} Bs
+                  </span>
+                </div>
+                <div className="mt-2 text-[11px] text-zinc-500">
+                  Con pujas, las tres cifras suben. Esto es el mínimo, no una previsión.
+                </div>
+              </div>
+
+              <div className="mt-2 text-[11px] text-zinc-500">
+                {resumen.conEscalera > 0
+                  ? `${resumen.conEscalera} de ${horses.length} caballos llevan escalera propia.`
+                  : "Ningún caballo lleva escalera propia: todos suben con el incremento fijo."}
+                {" "}
+                Apertura:{" "}
+                {opensDateISO && opensTime24
+                  ? `${opensDD}/${opensMM}/${opensAA} ${opensTime}`
+                  : "activo al crearse"}
+                . Cierre:{" "}
+                {closesDateISO && closesTime24
+                  ? `${closesDD}/${closesMM}/${closesAA} ${closesTime}`
+                  : "a mano"}
+                .
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => {
+                    setConfirmando(false)
+                    void onCreate()
+                  }}
+                  disabled={saving}
+                  className="flex-1 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-60"
+                >
+                  Crear remate
+                </button>
+                <button
+                  onClick={() => setConfirmando(false)}
+                  className="rounded-xl border border-zinc-700 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-200"
+                >
+                  Volver a revisar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {createdRaceId || createdRemateId ? (
           <div className="mt-4 text-xs text-zinc-500">

@@ -760,3 +760,37 @@ Las consecuencias no eran teóricas. `/reglas` —la página que el jugador abre
 **Consecuencias.** Seis importaciones y siete usos menos, los `pb-24` fuera, y `/reglas` con menú por primera vez. La regla de quién lo ve está escrita en un sitio y se lee en diez segundos.
 
 **Y una predicción de ayer que se cumplió.** ADR-030 decía que, con la tabla de notificaciones hecha, añadir los avisos que faltaban sería «una línea cada uno». Lo fue: cuatro llamadas a `_notificar` —recarga aprobada, recarga rechazada con su motivo, retiro pagado, retiro rechazado— en la migración `20261006100000`, sin tocar nada más. `P64` comprueba que existen **y** que los textos dicen lo que tienen que decir: una prueba que solo contara filas pasaría con los mensajes vacíos.
+
+---
+
+## ADR-033 · La casa no juega, y eso incluye la cartera
+
+**Fecha.** 5 de octubre de 2026, 22:40 hora de Caracas *(el archivo de la migración va numerado `20261006110000`; ver la nota del final)*
+
+**Contexto.** Jota preguntó, sobre el menú que acababa de unificar: *«no entendí muy bien lo de que al admin le saldrá para recargar/retirar, ¿eso no lo habíamos quitado cuando quitamos también lo de que podía pujar en un remate?»*
+
+Tenía razón, y la pregunta destapó bastante más que una decisión de interfaz.
+
+**Lo que encontré al comprobarlo.** La regla «los admins no participan en remates» vivía en la base desde el 30/09, pero **solo en `hacer_puja`**. Ni `solicitar_recarga` ni `solicitar_retiro` miraban el rol.
+
+Hasta ayer eso era raro pero inofensivo. Con la separación de funciones del ADR-028 —nadie procesa su propia solicitud— se convirtió en una trampa sin salida:
+
+1. el admin pide un retiro
+2. `solicitar_retiro` **le descuenta el saldo en el acto**
+3. nadie puede procesarlo: él mismo no, por el ADR-028; y si es el único admin de la instalación, no hay nadie más
+4. la solicitud queda pendiente **para siempre**, con el dinero descontado, y `casa_resumen` la cuenta como obligación de la casa a perpetuidad
+
+**Lo introduje yo ayer y no lo vi.** El ADR-028 cerró una puerta sin comprobar quién estaba dentro de la habitación. Y no lo encontró ninguna prueba: lo encontró una pregunta sobre un menú.
+
+**Decisión.** Un administrador no puede pedir recargas ni retiros. Es la regla que ya estaba escrita para las pujas, extendida a donde faltaba: **el administrador es el operador del sistema, no un usuario con saldo.**
+
+**La salida para quien ya tenía dinero.** Un jugador con saldo al que ascienden a admin no puede sacarlo. No se anula ni se mueve nada —mismo criterio que `20260930110000` con las pujas viejas: tocar dinero ya comprometido por un cambio de rol es peor que el problema—. Lo que se hace es **decirlo en el propio mensaje de error**: que un super admin le retire el cargo, haga la operación, y se lo devuelva. El código queda reservado (ADR-027), así que recupera su misma identidad en el registro.
+
+**Y la corrección del ADR-032.** Allí decidí que los admins vieran el menú de cliente, argumentando que «tienen cartera como cualquiera» y que eso unificaba hacia el comportamiento de cuatro de las seis pantallas. Las dos cosas estaban mal: la casa no juega, y **unificar hacia la mayoría era mal criterio** — cuatro pantallas hacían una cosa y dos hacían la correcta. Peor: le ofrecía a un admin dos botones que la base ahora le rechaza. Los admins no ven el menú de cliente.
+
+**Consecuencias.**
+- `P65` mide las tres cosas, y la tercera es la que importa: **que un usuario normal sí pueda**. Una guarda que además bloquea la operación legítima no es una guarda, es una avería.
+- `P60` hubo que reconstruirla, y el escenario nuevo es mejor: su admin ahora **pide siendo jugador y lo ascienden después**, que es el único camino por el que un admin puede tener una solicitud propia. Más realista que el anterior, no menos.
+- La lección: **al cerrar una puerta, comprobar quién queda encerrado.** Es el ADR-018 —antes de cerrar una puerta, buscar quién la usa— aplicado al revés y aprendido dos semanas después.
+
+**Sobre el número del archivo.** El prefijo de una migración es una **clave de orden**, no una fecha: lo único que la base exige es que sea creciente. Yo trabajo en UTC y Jota en Colombia (UTC−5), con la aplicación en hora de Caracas (UTC−4), así que a partir de las 19:00 suyas yo ya estoy en el día siguiente. La migración anterior salió numerada `20261006` cuando allí todavía era 5. **No se renumera** —ya está aplicada en producción y renombrarla descuadraría `schema_migrations`— y de aquí en adelante la fecha real va escrita en la cabecera, en hora de Caracas.
