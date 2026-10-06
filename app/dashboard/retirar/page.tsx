@@ -4,7 +4,6 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
-import ClientBottomNav from "@/app/components/ClientBottomNav"
 import { CornerLogo } from "@/app/components/BrandLogo"
 
 /**
@@ -217,7 +216,7 @@ export default function RetirarPage() {
   return (
     <>
       <div className="min-h-dvh bg-gray-950 text-gray-50">
-        <div className="mx-auto w-full max-w-md px-4 py-6 pb-24">
+        <div className="mx-auto w-full max-w-md px-4 py-6">
           <div className="mb-3">
             <CornerLogo />
           </div>
@@ -355,7 +354,6 @@ export default function RetirarPage() {
         </div>
         </div>
       </div>
-      {userId ? <ClientBottomNav /> : null}
     </>
   )
 }

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
-import ClientBottomNav from "@/app/components/ClientBottomNav"
 
 type SupportItem = {
   id: string
@@ -64,7 +63,7 @@ export default function ContactanosPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6 pb-24">
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
         <div className="mx-auto w-full max-w-md">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold">Contáctanos</h1>
@@ -129,7 +128,6 @@ export default function ContactanosPage() {
           )}
         </div>
       </main>
-      <ClientBottomNav />
     </>
   )
 }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AvisosDelUsuario from "./components/AvisosDelUsuario";
+import NavegacionCliente from "./components/NavegacionCliente";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -37,6 +38,9 @@ export default function RootLayout({
           <footer className="py-4 text-center text-xs text-zinc-400">
             Remate Catire Bello ©2026 Todos los derechos reservados. Desarrollado por Jercol Technologies.
           </footer>
+          {/* El menu de cliente, una sola vez para toda la aplicacion. Decide
+              el solo si toca pintarlo. Ver components/NavegacionCliente.tsx */}
+          <NavegacionCliente />
         </div>
       </body>
     </html>

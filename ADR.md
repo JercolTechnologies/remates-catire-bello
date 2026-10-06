@@ -730,3 +730,33 @@ Dos y no uno porque la cláusula `WHEN` de un trigger no puede mirar `OLD` en un
 **Consecuencias.** `P62` mide las tres cosas, y la tercera es la que impide que el arreglo sea peor que el problema: el alta emite, un cambio de estado emite, y **tocar una columna que la lista no muestra NO emite**.
 
 La pantalla pública recarga en silencio: solo la primera carga enseña «Cargando remates...». Una recarga disparada por una señal no puede dejar en blanco una lista que el usuario está mirando.
+
+---
+
+## ADR-032 · El menú de cliente vive en el layout, y la regla es una sola
+
+**Fecha.** 06/10/2026
+
+**Contexto.** `ClientBottomNav` estaba importado a mano en **seis** pantallas, con **tres** condiciones distintas:
+
+| pantalla | condición |
+|---|---|
+| `/contactanos` | siempre |
+| `/dashboard` y sus dos hijas | si hay sesión |
+| `/remates` y `/remates/[id]` | si hay sesión **y no es admin** |
+
+Las consecuencias no eran teóricas. `/reglas` —la página que el jugador abre justo antes de poner dinero— **no lo tenía**: entraba a leer las condiciones y se quedaba sin menú. Cualquier pantalla nueva nacía sin él y nadie se enteraba. Y la regla de «los admins no lo ven» se aplicaba en dos pantallas de seis, que es lo mismo que no tener regla.
+
+**Es el tercer caso de la misma forma esta semana**, y por eso merece quedar escrito como patrón y no como arreglo: el aviso de caja (ADR-026), el popup de avisos al usuario (ADR-030) y ahora el menú. Los tres empezaron pegados dentro de pantallas concretas; los tres tenían que estar por encima.
+
+**Decisión.** Un `NavegacionCliente` en el layout raíz que decide él solo si toca pintarse: **rutas de cliente, con sesión iniciada**.
+
+**Los admins también lo ven.** Tienen cartera y pueden recargar y retirar como cualquiera. Era ya el comportamiento de cuatro de las seis pantallas, así que esto unifica hacia donde estaba la mayoría en vez de inventar una regla nueva.
+
+**Las rutas se declaran por lo que NO son** — `/admin`, `/login`, `/register`, `/auth`, `/api`, y la portada. Una lista blanca habría que ampliarla con cada pantalla nueva, y la siguiente volvería a nacer sin menú: exactamente el defecto que se está cerrando. La lista negra es corta y estable.
+
+**El hueco lo pone el propio componente.** La barra es `fixed` y no ocupa sitio en el flujo; antes cada pantalla se acordaba de poner `pb-24`. Ahora el componente pinta la barra y su espaciador juntos: una pantalla nueva que se olvide del padding ya no acaba con el último botón tapado.
+
+**Consecuencias.** Seis importaciones y siete usos menos, los `pb-24` fuera, y `/reglas` con menú por primera vez. La regla de quién lo ve está escrita en un sitio y se lee en diez segundos.
+
+**Y una predicción de ayer que se cumplió.** ADR-030 decía que, con la tabla de notificaciones hecha, añadir los avisos que faltaban sería «una línea cada uno». Lo fue: cuatro llamadas a `_notificar` —recarga aprobada, recarga rechazada con su motivo, retiro pagado, retiro rechazado— en la migración `20261006100000`, sin tocar nada más. `P64` comprueba que existen **y** que los textos dicen lo que tienen que decir: una prueba que solo contara filas pasaría con los mensajes vacíos.

@@ -5,7 +5,6 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
-import ClientBottomNav from "@/app/components/ClientBottomNav"
 import { CornerLogo } from "@/app/components/BrandLogo"
 import { useSenal, TOPICO_LISTA, EVENTOS_LISTA } from "@/lib/realtime"
 
@@ -159,7 +158,7 @@ export default function RematesPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6 pb-24">
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
         <div className="mx-auto w-full max-w-md">
           <div className="mb-3">
             <CornerLogo />
@@ -267,7 +266,6 @@ export default function RematesPage() {
         )}
         </div>
       </main>
-      {authReady && hasSession && !isAdmin ? <ClientBottomNav /> : null}
     </>
   )
 }

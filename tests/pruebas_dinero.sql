@@ -4624,6 +4624,134 @@ exception when others then
 end $$;
 
 
+-- ============================================================================
+--  P64 - La caja avisa al cliente, y el aviso dice lo que hace falta saber
+--
+--  La maquinaria se construyo ayer para el premio (P61). Esto comprueba los
+--  cuatro enganches que faltaban:
+--
+--    recarga aprobada   -> avisa
+--    recarga rechazada  -> avisa, Y EL MOTIVO VA EN EL TEXTO
+--    retiro pagado      -> avisa
+--    retiro rechazado   -> avisa, y DICE QUE EL DINERO VOLVIO
+--
+--  LAS DOS COMPROBACIONES DE TEXTO NO SON CAPRICHO.
+--  El motivo ya se guardaba en la fila desde el 01/10 y el cliente lo veia si
+--  entraba a la pantalla. Pero el aviso que le salta encima es el momento en que
+--  de verdad lo lee: un "Recarga rechazada" a secas es un mensaje de soporte
+--  garantizado. Y en el retiro rechazado, que el dinero volvio es lo primero que
+--  quiere saber cualquiera -- si no se dice, asume lo peor.
+--
+--  Una prueba que solo contara filas pasaria aunque los textos quedaran vacios.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid; v_cliente uuid;
+  v_dep1 uuid; v_dep2 uuid; v_ret1 uuid; v_ret2 uuid;
+  v_existe boolean;
+  v_aprob boolean := false;
+  v_rech boolean := false;
+  v_rech_con_motivo boolean := false;
+  v_pagado boolean := false;
+  v_ret_rech boolean := false;
+  v_dice_que_volvio boolean := false;
+  v_detalle text := '';
+begin
+  perform _p.limpiar();
+
+  select to_regclass('public.notificaciones') is not null into v_existe;
+  if not v_existe then
+    perform _p.anotar(64, 'La caja avisa al cliente',
+      'cuatro avisos: recarga aprobada y rechazada, retiro pagado y rechazado',
+      false, 'falta la tabla notificaciones: la migracion 20261005150000 no esta aplicada');
+    return;
+  end if;
+
+  v_admin   := _p.usuario('admin', 0, true);
+  v_cliente := _p.usuario('juan', 5000);
+
+  -- Cuatro solicitudes del MISMO cliente. El admin las procesa, que es lo que
+  -- permite la guarda del ADR-028: nadie procesa lo suyo, pero otro si.
+  insert into public.deposit_requests (user_id, monto, metodo, telefono_pago, referencia, fecha_pago, estado)
+  values (v_cliente, 300, 'pago_movil', '04120000000', 'P64-A', current_date, 'pendiente'::deposit_status)
+  returning id into v_dep1;
+
+  insert into public.deposit_requests (user_id, monto, metodo, telefono_pago, referencia, fecha_pago, estado)
+  values (v_cliente, 400, 'pago_movil', '04120000000', 'P64-B', current_date, 'pendiente'::deposit_status)
+  returning id into v_dep2;
+
+  perform _p.actuar_como(v_admin);
+  perform public.aprobar_recarga(v_dep1);
+  perform public.rechazar_recarga(v_dep2, 'comprobante_ilegible', 'se ve borroso');
+
+  select exists (
+    select 1 from public.notificaciones
+    where user_id = v_cliente and tipo = 'recarga' and ref_externa = v_dep1::text
+      and titulo ilike '%aprobada%') into v_aprob;
+
+  select exists (
+    select 1 from public.notificaciones
+    where user_id = v_cliente and tipo = 'recarga' and ref_externa = v_dep2::text
+      and titulo ilike '%rechazada%') into v_rech;
+
+  -- El MOTIVO, dentro del texto. No basta con que exista la fila.
+  select exists (
+    select 1 from public.notificaciones
+    where ref_externa = v_dep2::text
+      and mensaje ilike '%' || public._motivo_etiqueta('comprobante_ilegible','recarga') || '%'
+      and mensaje ilike '%borroso%') into v_rech_con_motivo;
+
+  -- Ahora los retiros. El cliente los pide; el admin los procesa.
+  perform _p.actuar_como(v_cliente);
+  perform public.solicitar_retiro(100, 'pago_movil', '04121111111');
+  select id into v_ret1 from public.withdraw_requests
+   where user_id = v_cliente and estado = 'pendiente'::withdraw_status limit 1;
+
+  perform _p.actuar_como(v_admin);
+  perform public.procesar_retiro(v_ret1, 'pagado'::withdraw_status, null, null);
+
+  perform _p.actuar_como(v_cliente);
+  perform public.solicitar_retiro(150, 'pago_movil', '04121111111');
+  select id into v_ret2 from public.withdraw_requests
+   where user_id = v_cliente and estado = 'pendiente'::withdraw_status limit 1;
+
+  perform _p.actuar_como(v_admin);
+  perform public.procesar_retiro(v_ret2, 'rechazado'::withdraw_status, 'datos_destino_incorrectos', null);
+
+  select exists (
+    select 1 from public.notificaciones
+    where user_id = v_cliente and tipo = 'retiro' and ref_externa = v_ret1::text
+      and titulo ilike '%pagado%') into v_pagado;
+
+  select exists (
+    select 1 from public.notificaciones
+    where user_id = v_cliente and tipo = 'retiro' and ref_externa = v_ret2::text
+      and titulo ilike '%rechazado%') into v_ret_rech;
+
+  -- Que el dinero volvio tiene que estar DICHO, no deducido del movimiento.
+  select exists (
+    select 1 from public.notificaciones
+    where ref_externa = v_ret2::text and mensaje ilike '%volvio a tu saldo%')
+    into v_dice_que_volvio;
+
+  v_detalle := ' avisos del cliente=' ||
+    (select count(*)::text from public.notificaciones where user_id = v_cliente);
+
+  perform _p.anotar(64, 'La caja avisa al cliente',
+    'los cuatro avisos existen; el de recarga rechazada lleva el motivo y la nota; el de retiro rechazado dice que el dinero volvio',
+    v_aprob and v_rech and v_rech_con_motivo and v_pagado and v_ret_rech and v_dice_que_volvio,
+    'recarga_aprobada=' || v_aprob::text ||
+    ' recarga_rechazada=' || v_rech::text ||
+    ' con_motivo_y_nota=' || v_rech_con_motivo::text ||
+    ' retiro_pagado=' || v_pagado::text ||
+    ' retiro_rechazado=' || v_ret_rech::text ||
+    ' dice_que_volvio=' || v_dice_que_volvio::text || v_detalle);
+exception when others then
+  perform _p.anotar(64, 'La caja avisa al cliente',
+    'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
 -- ---------------------------------------------------------------- resumen
 \set QUIET off
 select n as "#", nombre, esperado, estado, detalle from _p.resultado order by n;

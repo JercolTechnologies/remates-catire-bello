@@ -7,7 +7,6 @@ import Link from "next/link"
 import { useParams } from "next/navigation"
 import { useSenal, topicoRemate, EVENTOS_REMATE } from "@/lib/realtime"
 import { supabase } from "@/lib/supabaseClient"
-import ClientBottomNav from "@/app/components/ClientBottomNav"
 import { CornerLogo } from "@/app/components/BrandLogo"
 
 type RemateRow = {
@@ -478,7 +477,7 @@ export default function RemateDetallePage() {
   if (!remate) {
     return (
       <>
-        <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6 pb-24">
+        <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
           <div className="mx-auto w-full max-w-md">
             <div className="mb-3">
               <CornerLogo />
@@ -491,7 +490,6 @@ export default function RemateDetallePage() {
             </div>
           </div>
         </main>
-        {userId && !isAdmin ? <ClientBottomNav /> : null}
       </>
     )
   }
@@ -504,7 +502,7 @@ export default function RemateDetallePage() {
 
   return (
     <>
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6 pb-24">
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
         <div className="mx-auto w-full max-w-md">
           <div className="mb-3">
             <CornerLogo />
@@ -778,7 +776,6 @@ export default function RemateDetallePage() {
         </div>
       </div>
       </main>
-      {userId && !isAdmin ? <ClientBottomNav /> : null}
     </>
   )
 }

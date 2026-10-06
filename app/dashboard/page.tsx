@@ -6,7 +6,6 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import ClientBottomNav from "@/app/components/ClientBottomNav"
 import { CornerLogo } from "@/app/components/BrandLogo"
 
 type WalletRow = {
@@ -297,7 +296,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6 pb-24">
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
         <div className="mx-auto w-full max-w-md">
           <div className="mb-3">
             <CornerLogo />
@@ -496,7 +495,6 @@ export default function DashboardPage() {
         </div>
         </div>
       </main>
-      {userId ? <ClientBottomNav /> : null}
     </>
   )
 }

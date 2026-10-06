@@ -1,11 +1,11 @@
 # Pendientes — al 5 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-01.md`, que se queda como histórico. Lo cerrado
-no se detalla aquí: está en `ADR.md` (31 decisiones) y en el arnés.
+no se detalla aquí: está en `ADR.md` (32 decisiones) y en el arnés.
 
-**Estado del proyecto:** 63/63 en `tests/pruebas_dinero.sql`, 4/4 en
+**Estado del proyecto:** 64/64 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 31 en `tests/fechas.mjs`, 32 en `tests/log.mjs`.
-35 migraciones, 31 ADRs.
+36 migraciones, 32 ADRs.
 
 ---
 
@@ -28,6 +28,8 @@ no se detalla aquí: está en `ADR.md` (31 decisiones) y en el arnés.
 | `/reglas` reescrita: lee de la base y describe el modelo real | ADR-029, P63 |
 | **Aviso al ganador** al liquidar, en vivo y al iniciar sesión | ADR-030, P61 |
 | **Canal de la colección**: un remate nuevo aparece solo | ADR-031, P62 |
+| Avisos de recarga y retiro al cliente, con su motivo | `20261006100000`, P64 → **cierra el punto 3 de dentro de la app** |
+| El menú de cliente vive en el layout, con una sola regla | ADR-032 |
 
 ---
 
@@ -45,20 +47,13 @@ Lo que falta es el RPC transaccional. Ya no es urgente; sigue siendo correcto.
 *Aceptación:* forzar el fallo en el paso de reglas y comprobar que no queda
 ninguna carrera ni remate.
 
-### 1.2 · Las notificaciones que faltan, que ahora son una línea cada una
-La tabla, el canal por usuario y el popup ya están (ADR-030). Quedan por
-enganchar, llamando a `_notificar` donde corresponde:
+### 1.2 · Modal de confirmación al crear un remate
+Con los tres números de dinero a la vista antes de escribir nada. Pedido el
+01/10 y sigue abierto.
 
-- recarga aprobada → en `aprobar_recarga`
-- recarga rechazada, **con su motivo** → en `rechazar_recarga`
-- retiro pagado o rechazado → en `procesar_retiro`
-
-Es la mitad del punto 3 de este documento, y la barata.
-
-### 1.3 · El `ClientBottomNav` pegado a mano en 6 pantallas
-Con 3 condiciones distintas; en `/remates` se oculta para admins. Cualquier
-pantalla nueva nace sin él. El patrón correcto ya existe dos veces en el repo:
-el layout de `/admin` (ADR-026) y el popup de avisos en el layout raíz.
+### 1.3 · Aviso del incremento ANTES de pujar
+Jota: *«ahí el usuario decide si puja con el incremento o lo deja ahí»*. Hoy el
+aviso sale **después** de intentar la puja, que es tarde.
 
 ## 2 · Dinero y operación
 
@@ -98,10 +93,6 @@ admin cerró el navegador:
 - **Navbar arriba.** Decisión de forma pendiente de Jota.
 - **Nombre de usuario visible en todas las secciones, y debajo el saldo**, como
   en las casas de apuestas.
-- **`ClientBottomNav` está pegado a mano en 6 pantallas con 3 condiciones
-  distintas** (en `/remates` se oculta para admins). Cualquier pantalla nueva
-  nace sin él. El patrón correcto ya existe: un layout de cliente, como el que
-  se hizo para `/admin`.
 - **Ver incremento y pozo por caballo** desde la pantalla de admin.
 - **`/contactanos`**: la información está, los enlaces no son activos.
 - **`©2026` clavado** en el pie.

@@ -52,7 +52,7 @@ No leas todo. Lee lo que toca:
 | dar de alta un licenciatario | `docs/supabase/INSTALACION_LICENCIATARIO.md` |
 | saber qué falta | `PENDIENTES_2026-10-05.md` (el 10-01 es histórico) y `BACKLOG_FASE1_FIXES.md` |
 
-`ADR.md` son 31 decisiones con su contexto, su alternativa descartada y qué las
+`ADR.md` son 32 decisiones con su contexto, su alternativa descartada y qué las
 revertiría. **Casi siempre la pregunta que te estás haciendo ya está contestada ahí.**
 Si tomas una decisión de arquitectura nueva, añade su ADR al final.
 
@@ -80,7 +80,7 @@ supabase/
   migrations/         30 archivos. El 00000000000000 es el baseline sacado de produccion
   snippets/           consultas de diagnostico para el SQL Editor del panel
 tests/
-  pruebas_dinero.sql  63 pruebas. UNA conexion. Es el juez.
+  pruebas_dinero.sql  64 pruebas. UNA conexion. Es el juez.
   concurrencia.sql    4 pruebas de carreras. Necesita que el arnes haya corrido antes
   fechas.mjs          31 comprobaciones de SelectorFechaHora  (pnpm test:fechas)
   log.mjs             32 comprobaciones de /admin/log          (pnpm test:log)
@@ -100,7 +100,7 @@ docs/supabase/
 ## 4. El ciclo, en orden, sin saltarse pasos
 
 1. Escribir la migración (nueva, nunca editar una ya aplicada: no se vuelve a ejecutar).
-2. Jota corre `pnpm db:reset` + el arnés en local. **Marcador esperado: 63/63 y 4/4.**
+2. Jota corre `pnpm db:reset` + el arnés en local. **Marcador esperado: 64/64 y 4/4.**
 3. Jota hace respaldo y `pnpm db:push:produccion`.
 4. **Comprobar que llegó**, antes de desplegar nada:
    `select version from supabase_migrations.schema_migrations order by version desc limit 5;`
