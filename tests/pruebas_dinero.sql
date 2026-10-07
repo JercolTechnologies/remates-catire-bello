@@ -5428,6 +5428,165 @@ begin
 end $$;
 
 
+
+-- ============================================================================
+--  P69 - La bitacora no anuncia lo que no paso, y dice que paso cuando pasa
+--
+--  LO QUE JOTA VIO EN /admin/log EL 07/10. Cambio solo el incremento del
+--  remate y el log dijo ademas "Guardar escaleras: Tramos ahora 0, antes 0".
+--  Cambio solo las escaleras y el log dijo ademas "Remate editado" sin una
+--  etiqueta. La pantalla llama a las dos RPC en todos los guardados, asi que
+--  cada guardado dejaba dos asientos aunque solo hubiera un cambio.
+--
+--  LO QUE MIDE
+--   1. guardar_escaleras con las MISMAS escaleras: no deja asiento y no toca
+--      las filas (se comprueba que los ids no cambiaron: si hubiera borrado e
+--      insertado, serian otros)
+--   2. guardar_escaleras con escaleras distintas: deja UN asiento, y el
+--      detalle nombra al caballo que cambio y NO a los que no
+--   3. editar_remate sin cambiar nada: no deja asiento
+--   4. editar_remate cambiando el incremento: deja asiento con antes y despues
+--   5. un remate que no tenia escaleras y sigue sin tenerlas: no deja asiento
+--      (el caso exacto de las 1:11, 0 -> 0)
+--
+--  REGLA DEL 28/09: cuando el exito es "salto una excepcion" se comprueba
+--  cual. Aqui el exito es "NO se escribio", que se mide contando asientos
+--  antes y despues, no confiando en que la funcion devuelva algo.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid;
+  v_existe boolean;
+  v_rem uuid; v_race uuid; v_c1 uuid; v_c2 uuid;
+  v_reglas jsonb;
+  v_ids_antes uuid[]; v_ids_despues uuid[];
+  v_n int; v_detalle jsonb; v_muestra text;
+
+  v_sin_cambio_ok boolean := false;
+  v_no_toca_filas boolean := false;
+  v_con_cambio_ok boolean := false;
+  v_nombra_bien boolean := false;
+  v_editar_vacio_ok boolean := false;
+  v_editar_real_ok boolean := false;
+  v_vacias_ok boolean := false;
+begin
+  perform _p.limpiar();
+  delete from public.admin_actions;
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'guardar_escaleras'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(69, 'La bitacora no anuncia lo que no paso',
+      'guardar_escaleras y editar_remate solo dejan asiento si hubo cambio',
+      false, 'guardar_escaleras NO EXISTE: la migracion 20261007170000 no esta aplicada');
+    return;
+  end if;
+
+  update public.ajustes_instalacion set valor = '50' where clave = 'minimo_incremento';
+
+  v_admin := _p.usuario('jefa', 0, true);
+  perform _p.actuar_como(v_admin);
+
+  select c.id_carrera, c.id_remate into v_race, v_rem
+  from public.crear_remate_completo(
+    jsonb_build_object('nombre','C','fecha',current_date::text),
+    jsonb_build_object('nombre','R','incremento_minimo',50,'porcentaje_casa',25),
+    jsonb_build_array(
+      jsonb_build_object('numero',3,'nombre','Tres','precio_salida',100),
+      jsonb_build_object('numero',5,'nombre','Cinco','precio_salida',100)
+    )) c;
+
+  select h.id into v_c1 from public.horses h where h.race_id = v_race and h.numero = 3;
+  select h.id into v_c2 from public.horses h where h.race_id = v_race and h.numero = 5;
+
+  -- Escaleras iniciales: dos tramos al caballo 3.
+  v_reglas := jsonb_build_array(
+    jsonb_build_object('horse_id', v_c1, 'min_precio', 100, 'max_precio', 500, 'incremento', 50),
+    jsonb_build_object('horse_id', v_c1, 'min_precio', 500, 'max_precio', null, 'incremento', 100));
+  perform public.guardar_escaleras(v_rem, v_reglas);
+
+  delete from public.admin_actions where action = 'guardar_escaleras';
+
+  -- --------------------------------- 1) las MISMAS escaleras otra vez
+  select array_agg(r.id order by r.id) into v_ids_antes
+  from public.remate_price_rules r where r.remate_id = v_rem;
+
+  -- El navegador manda 50, no 50.00: si la comparacion fuera de textos en
+  -- crudo, esto parecria un cambio.
+  perform public.guardar_escaleras(v_rem, v_reglas);
+
+  select count(*) into v_n from public.admin_actions a where a.action = 'guardar_escaleras';
+  v_sin_cambio_ok := v_n = 0;
+
+  select array_agg(r.id order by r.id) into v_ids_despues
+  from public.remate_price_rules r where r.remate_id = v_rem;
+  -- Si hubiera borrado e insertado, los ids serian otros.
+  v_no_toca_filas := v_ids_antes = v_ids_despues;
+
+  -- --------------------------------- 2) escaleras distintas
+  perform public.guardar_escaleras(v_rem, jsonb_build_array(
+    jsonb_build_object('horse_id', v_c1, 'min_precio', 100, 'max_precio', 500, 'incremento', 50),
+    jsonb_build_object('horse_id', v_c1, 'min_precio', 500, 'max_precio', null, 'incremento', 100),
+    jsonb_build_object('horse_id', v_c2, 'min_precio', 100, 'max_precio', null, 'incremento', 75)));
+
+  select count(*) into v_n from public.admin_actions a where a.action = 'guardar_escaleras';
+  v_con_cambio_ok := v_n = 1;
+
+  select a.details into v_detalle
+  from public.admin_actions a where a.action = 'guardar_escaleras' limit 1;
+
+  -- Nombra al caballo 5, que es el que cambio, y NO al 3, que se quedo igual.
+  -- Se guarda la frase AQUI: la fase 5 borra los asientos, y si se leyera al
+  -- final el informe saldria vacio justo en lo que esta prueba viene a
+  -- demostrar.
+  v_muestra := coalesce(v_detalle->'caballo_5'->>'antes','?')
+            || ' -> ' || coalesce(v_detalle->'caballo_5'->>'despues','?');
+
+  v_nombra_bien :=
+        v_detalle ? 'caballo_5'
+    and not (v_detalle ? 'caballo_3')
+    and v_detalle->'caballo_5'->>'antes' = 'sin escalera'
+    -- La frase entera, no un `like`: fija el singular ("1 tramo", no
+    -- "1 tramos") y la coma decimal, que es como se escribe el dinero en el
+    -- resto de la aplicacion.
+    and v_detalle->'caballo_5'->>'despues' = '1 tramo (sube 75,00)';
+
+  -- --------------------------------- 3) editar_remate sin cambiar nada
+  delete from public.admin_actions;
+  perform public.editar_remate(v_rem, 25, 50, 'vivo', null, null, false, false);
+  select count(*) into v_n from public.admin_actions a where a.action = 'editar_remate';
+  v_editar_vacio_ok := v_n = 0;
+
+  -- --------------------------------- 4) editar_remate cambiando de verdad
+  perform public.editar_remate(v_rem, 25, 150, 'vivo', null, null, false, false);
+  select count(*) into v_n from public.admin_actions a where a.action = 'editar_remate';
+  select a.details into v_detalle from public.admin_actions a where a.action = 'editar_remate' limit 1;
+  v_editar_real_ok := v_n = 1
+    and v_detalle->'incremento_minimo'->>'antes' = '50.00'
+    and v_detalle->'incremento_minimo'->>'despues' = '150';
+
+  -- --------------------------- 5) sin escaleras y sigue sin escaleras
+  -- El caso exacto de las 1:11: "Tramos ahora: 0 | Tramos antes: 0".
+  perform public.guardar_escaleras(v_rem, '[]'::jsonb);   -- las quita (si deja asiento)
+  delete from public.admin_actions where action = 'guardar_escaleras';
+  perform public.guardar_escaleras(v_rem, '[]'::jsonb);   -- y otra vez: nada que hacer
+  select count(*) into v_n from public.admin_actions a where a.action = 'guardar_escaleras';
+  v_vacias_ok := v_n = 0;
+
+  perform _p.anotar(69, 'La bitacora no anuncia lo que no paso',
+    'guardar las mismas escaleras no deja asiento ni toca las filas; cambiarlas deja uno que nombra al caballo que cambio; editar_remate sin cambios no deja asiento y con cambios si',
+    v_sin_cambio_ok and v_no_toca_filas and v_con_cambio_ok and v_nombra_bien
+      and v_editar_vacio_ok and v_editar_real_ok and v_vacias_ok,
+    format('mismas_escaleras_sin_asiento=%s no_toca_las_filas=%s | cambio_deja_uno=%s nombra_al_que_cambio=%s | editar_sin_cambios=%s editar_con_cambios=%s | cero_a_cero=%s | detalle del cambio: %s',
+      v_sin_cambio_ok, v_no_toca_filas, v_con_cambio_ok, v_nombra_bien,
+      v_editar_vacio_ok, v_editar_real_ok, v_vacias_ok,
+      'Caballo 5: ' || coalesce(v_muestra,'-')));
+end $$;
+
+
 -- ---------------------------------------------------------------- resumen
 \set QUIET off
 select n as "#", nombre, esperado, estado, detalle from _p.resultado order by n;

@@ -19,8 +19,12 @@ Estas no se negocian ni se interpretan. Si una te estorba, dilo y para; no la ro
 
 1. **No toques git. Nunca.** Ni `add`, ni `commit`, ni `push`, ni `status`. Jota hace
    todo git él mismo. Tú le entregas el **mensaje de commit** y ya.
-2. **No ejecutes comandos locales.** Ni `pnpm`, ni `supabase`, ni `docker`, ni el arnés.
-   Los corre Jota en su máquina y te pega la salida. Tú escribes, verificas y explicas.
+2. **No escribas en la base de producción.** `pnpm db:push:produccion` lo corre Jota,
+   siempre. Es el único paso del ciclo que no se deshace con un `git revert`.
+   Lo que sí haces tú, desde el 07/10: **todo lo demás en su máquina** — el arnés,
+   `pnpm db:reset`, `supabase migration list`, `db push --dry-run`, el typecheck,
+   el lint, los `tests/*.mjs`. Antes se los pegaba él a mano y se perdía la mitad
+   del tiempo en eso.
 3. **Antes de ejecutar algo, consulta la documentación.** Cuesta segundos y evita
    repetir errores. Es regla, no sugerencia.
 4. **Lo que es base de datos vive en la base; lo que es frontend, en el frontend.**
@@ -52,9 +56,9 @@ No leas todo. Lee lo que toca:
 | tocar realtime | ADR-024, ADR-025, ADR-026 + `lib/realtime.ts` |
 | tocar contabilidad | ADR-022 + `supabase/migrations/20261005100000_descuadre_inexplicado.sql` |
 | dar de alta un licenciatario | `docs/supabase/INSTALACION_LICENCIATARIO.md` |
-| saber qué falta | `PENDIENTES_2026-10-05.md` (el 10-01 es histórico) y `BACKLOG_FASE1_FIXES.md` |
+| saber qué falta | `PENDIENTES_2026-10-07.md` (el 10-05 y el 10-01 son históricos) y `BACKLOG_FASE1_FIXES.md` |
 
-`ADR.md` son 34 decisiones con su contexto, su alternativa descartada y qué las
+`ADR.md` son 38 decisiones con su contexto, su alternativa descartada y qué las
 revertiría. **Casi siempre la pregunta que te estás haciendo ya está contestada ahí.**
 Si tomas una decisión de arquitectura nueva, añade su ADR al final.
 
@@ -79,13 +83,13 @@ lib/
   motivos.ts          motivos de rechazo
   supabaseClient.ts
 supabase/
-  migrations/         30 archivos. El 00000000000000 es el baseline sacado de produccion
+  migrations/         41 archivos. El 00000000000000 es el baseline sacado de produccion
   snippets/           consultas de diagnostico para el SQL Editor del panel
 tests/
-  pruebas_dinero.sql  66 pruebas. UNA conexion. Es el juez.
+  pruebas_dinero.sql  69 pruebas. UNA conexion. Es el juez.
   concurrencia.sql    4 pruebas de carreras. Necesita que el arnes haya corrido antes
-  fechas.mjs          31 comprobaciones de SelectorFechaHora  (pnpm test:fechas)
-  log.mjs             32 comprobaciones de /admin/log          (pnpm test:log)
+  fechas.mjs          30 comprobaciones de SelectorFechaHora  (pnpm test:fechas)
+  log.mjs             33 comprobaciones de /admin/log          (pnpm test:log)
   aviso_puja.mjs      31 comprobaciones del aviso de puja      (pnpm test:aviso)
 docs/supabase/
   COMO_APLICAR.md     el ciclo de migraciones. Leelo entero antes de la primera
@@ -107,13 +111,27 @@ docs/supabase/
    Numérala con la hora de **Caracas** (`TZ=America/Caracas date`), no con la del
    entorno: tu reloj puede ir en UTC y adelantar un día respecto a Jota, que está
    en Colombia. Y escribe la fecha real, en hora de Caracas, en la cabecera.
-2. Jota corre `pnpm db:reset` + el arnés en local. **Marcador esperado: 66/66 y 4/4.**
-3. Jota hace respaldo y `pnpm db:push:produccion`.
-4. **Comprobar que llegó**, antes de desplegar nada:
-   `select version from supabase_migrations.schema_migrations order by version desc limit 5;`
-   Si tu migración no está arriba del todo, **el push no llegó**. No despliegues encima.
-   Esto no es paranoia: pasó el 01/10 y el cliente vio el error en su pantalla.
-5. Commit y deploy a Vercel.
+2. `pnpm db:reset` + el arnés en local. **Marcador esperado: 69/69 y 4/4.**
+   Esto lo corres **tú** en su máquina; no se lo pidas a Jota.
+   **El arnés NUNCA contra producción**: su primera función es `_p.limpiar()`, que
+   borra wallets, pujas, perfiles y `admin_actions`. No tiene ninguna guarda que lo
+   impida, solo un comentario en la línea 4.
+3. `npx -y supabase@2.118.0 db push --dry-run` — dice exactamente qué migraciones
+   se van a aplicar sin aplicar ninguna. Si ahí aparece algo que no esperabas (una
+   migración vieja que nunca llegó), te enteras **antes**.
+4. Jota hace respaldo y `pnpm db:push:produccion`. **Este paso es suyo, no tuyo.**
+5. **Comprobar que llegó**, antes de desplegar nada:
+   `npx -y supabase@2.118.0 migration list` — enseña local y remoto lado a lado, que
+   es más claro que consultar `supabase_migrations.schema_migrations` a mano.
+   Si tu migración no está en las dos columnas, **el push no llegó**. No despliegues
+   encima. No es paranoia: pasó el 01/10 y el cliente vio el error en su pantalla.
+6. Jota hace el commit y el push a GitHub, y Vercel despliega.
+
+**Si la migración QUITA permisos que el frontend viejo usa, el orden importa:**
+primero la base, después el código. Con la base aplicada y el frontend viejo todavía
+en Vercel se rompe solo lo que use ese permiso, de forma ruidosa y sin escribir nada.
+Al revés, el frontend nuevo llamaría a RPC que aún no existen. Pasó el 07/10 con
+`remate_price_rules`.
 
 Cambio solo de frontend: pasos 1–4 no aplican, pero el typecheck sí.
 
@@ -136,6 +154,13 @@ Cambio solo de frontend: pasos 1–4 no aplican, pero el typecheck sí.
   de recibo (ADR-023). Si lo construyes, tiene que decir la verdad sobre su propio estado.
 - Antes de cerrar una puerta, busca quién la usa (ADR-018) **y comprueba quién
   queda encerrado** (ADR-033).
+- **Un asiento de bitácora que no corresponde a un cambio es ruido que devalúa a los
+  demás** (ADR-038). Si una RPC se llama en todos los guardados, es ella —no la
+  pantalla— quien tiene que comparar y decidir si hubo cambio. Y el asiento dice
+  **qué** cambió, no cuántas filas se tocaron.
+- **Antes de dar por bueno un rojo conocido, lee el detalle entero.** El 07/10 P47
+  llevaba un hallazgo real (`sin declarar: 1`, una RPC nueva sin censar) escondido
+  detrás del falso de `pgcrypto` que sale siempre en un Postgres pelado.
 - **`now()` es la hora de la TRANSACCIÓN, no del reloj.** Dentro de un `do $$`
   todo comparte instante: dos filas creadas «una después de otra» tienen el mismo
   `created_at`, y `order by created_at` o `>` no distinguen. Ha mordido tres

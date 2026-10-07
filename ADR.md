@@ -852,3 +852,86 @@ Peor: `app/reglas/page.tsx` ya prometía, textual, que *«el mínimo siguiente s
 **Una sola implementación del formulario.** Móvil y escritorio tenían **dos copias** del input, el botón y el renglón de ayuda. El ADR-015 habla de DB contra frontend, pero la lección es la misma dentro de un archivo: ahora el bloque de acción se construye una vez y las dos maquetas lo pintan.
 
 **Consecuencias.** `tests/aviso_puja.mjs`, 31 comprobaciones (`pnpm test:aviso`), que transpila los archivos reales y ejecuta sus funciones —sin copias, mismo método que `tests/fechas.mjs`—. Cubre el caso que no se ve mirando: **el jugador que ya lidera el caballo**, donde subir la propia puja la *reemplaza* y no la suma. Ese error ya se cometió aquí una vez (defecto R4: se restaba la puja más alta histórica en vez de la que lidera ahora) y ahora hay una prueba que falla si vuelve.
+
+---
+
+## ADR-036 · Crear un remate es una transacción, o no es nada
+
+**Fecha.** 7 de octubre de 2026 *(migración `20261007130000`)*
+
+**Contexto.** Crear un remate eran **cinco llamadas** desde el navegador, cada una su propia transacción ya confirmada: `races`, `remates`, `horses`, un `select` para recuperar los ids, y `remate_price_rules`. El `catch` del formulario hacía exactamente una cosa: `setError(...)`. Ni un `delete`, ni un intento de limpieza.
+
+Medido en el arnés, con el admin repitiendo el número 5:
+
+```
+ carrera_huerfana | remate_huerfano | estado  | caballos | senales_a_los_jugadores
+------------------+-----------------+---------+----------+-------------------------
+                1 |               1 | abierto |        0 |                       1
+```
+
+**La restricción de la base no es la víctima: es el gatillo.** `horses_race_id_numero_key UNIQUE (race_id, numero)` viene en el baseline, línea 2050, y rechaza el duplicado con 23505 — correctamente. Lo que faltaba era que ese rechazo ocurriera **dentro** de una transacción. Y desde el ADR-031 el remate roto no se queda esperando a que alguien lo encuentre: la señal ya salió a la lista de todos los jugadores conectados.
+
+**La segunda víctima, que no se ve.** Entre el insert de caballos y el de reglas el remate ya está abierto y los caballos existen, pero **las escaleras todavía no**. Un jugador que puje en esos milisegundos recibe `remates.incremento_minimo` en vez de la escalera configurada. Dentro de una transacción es imposible: en READ COMMITTED nadie ve filas sin confirmar.
+
+**Decisión: `crear_remate_completo(jsonb, jsonb, jsonb)`.** Una función PL/pgSQL es una transacción, así que **no hay que escribir ningún rollback**: lo da el motor. Tres `jsonb` porque las escaleras cuelgan de su caballo y eso no se aplana sin mentir. El `select` para recuperar los ids desaparece: dentro se usa `insert ... returning`.
+
+**No añade ni una regla de negocio.** Los `NOT NULL`, la restricción de números repetidos y los tres disparadores de mínimos ya estaban; lo único que cambia es **cuándo** se aplican. Lo que sí pone, dicho en voz alta en la cabecera del archivo: un remate sin caballos se rechaza —el esquema lo permitía y es justo la basura que esto viene a impedir— y el `23505` se traduce a una frase que el admin entienda.
+
+**Un error mío que vale documentar.** Propuse llevar la validación de números repetidos «del formulario a la base» y Jota dio luz verde sobre esa premisa. **Era falsa**: ya estaba en la base desde el primer día, y el propio `crear-remate/page.tsx` lo decía en un comentario. Lo afirmé sin ejecutarlo. La luz verde se corrigió antes de escribir nada.
+
+**Consecuencias.** `P67`, seis fases: el camino bueno escribe las cuatro tablas y cuelga cada escalera de su caballo; una guarda, un `NOT NULL`, un número repetido, cero caballos o un jugador rechazan **sin dejar nada** —`basura=0` y `senal=0`—. Queda fuera a propósito el estado del remate con `opens_at` futuro y la clave de idempotencia: un doble clic sigue creando dos remates, igual que antes.
+
+---
+
+## ADR-037 · Las escaleras se reemplazan de una vez, y la tabla se cierra
+
+**Fecha.** 7 de octubre de 2026 *(migración `20261007150000`)*
+
+**Contexto.** La pantalla de editar guardaba las escaleras con un `delete` de todas las del remate y un `insert` de las nuevas, **en dos llamadas sueltas**. Entre las dos, el remate no tenía ninguna escalera: en vivo, y con dinero ya comprometido.
+
+**Lo peor no era la pérdida.** Si se interrumpía ahí, el admin leía «Error guardando cambios» y deducía que no se había tocado nada, cuando el borrado ya estaba hecho. Un fallo que miente sobre su propio alcance.
+
+**Lo que NO era: un problema de dinero.** El monto que se cobra siempre es el que la pantalla mostró, porque `remate_minimos()` y `hacer_puja` leen el mismo `_incremento_aplicable`. Nadie paga un número distinto del que vio y el descuadre sigue en cero. El daño es comercial: la subasta avanza con incrementos que no son los anunciados.
+
+**Decisión: `guardar_escaleras(uuid, jsonb)`** — el borrado y la inserción en una transacción. Se eligió **esto y no el `guardar_remate_completo` entero** porque cierra la única ventana que falla *en silencio* con un cambio de 30 líneas, en vez de reescribir el guardado de una pantalla que funciona. El resto de ese guardado siguen siendo 16 o 17 escrituras sueltas, una por caballo.
+
+**Tres cosas que la función pone y no son «arreglar la transacción»**, dichas en voz alta para que nadie las descubra leyendo el cuerpo: una escalera solo puede ser de un caballo **de esta carrera** —la FK ataba `horse_id` a `horses`, pero nada al remate, y como esta función pasa a ser la puerta, sin eso el agujero lo abriría ella—; un candado por remate, porque sin él dos admins guardando a la vez mezclan las dos escaleras; y asiento en la bitácora, que las escrituras directas no podían dejar.
+
+**Y se cierra la puerta de atrás.** `remate_price_rules` baja a **solo lectura** para `authenticated`: crear pasa por `crear_remate_completo` y editar por `guardar_escaleras`, las dos `security definer`. Es la primera de las cuatro tablas del catálogo que se cierra; `races`, `horses` y `support_settings` siguen abiertas porque la pantalla de editar todavía las escribe. P48 lo declara, así que el día que alguien vuelva a poner un `.insert()` directo **dejará de funcionar en vez de funcionar a medias**.
+
+**El beneficio de seguridad es menor de lo que parece, y conviene decirlo:** las políticas RLS ya exigían `is_admin()` para escribir esas tablas. Ningún jugador podía colarse. Lo que se gana es que ni siquiera un admin pueda escribirlas sin dejar rastro.
+
+**Consecuencias.** `P68`, seis fases. La que importa: cuando una escalera nueva no pasa una guarda, **las viejas siguen ahí** (`quedan=2`). Si el borrado no se deshiciera, ese número sería 0.
+
+---
+
+## ADR-038 · Una bitácora que anuncia lo que no pasó enseña a no leerla
+
+**Fecha.** 7 de octubre de 2026 *(migración `20261007170000`)*
+
+**Contexto.** Jota, mirando `/admin/log` el mismo día:
+
+```
+1:11:31  Guardar escaleras   Tramos ahora: 0 | Tramos antes: 0
+1:11:31  Remate editado      Incremento: 50 → 150
+1:09:23  Guardar escaleras   Tramos ahora: 0 | Tramos antes: 5
+1:09:22  Remate editado      (sin una sola etiqueta)
+```
+
+A las 1:11 cambió el incremento y **no** tocó las escaleras; a las 1:09 cambió las escaleras y **no** tocó el remate. Las dos entradas sobrantes son falsas.
+
+**La causa es la misma en las dos.** La pantalla de editar llama a `editar_remate` **y** a `guardar_escaleras` en todos los guardados, toque el admin lo que toque. Antes del ADR-037 eso no se notaba porque las escaleras se escribían directo y no dejaban asiento. **Al darles auditoría, una llamada inútil se convirtió en una entrada falsa.**
+
+Es el ADR-022 —la alarma que saltaba cuando no pasaba nada— y el ADR-034 —el aviso que se dispara de más devalúa a los demás— en la bitácora. Y aquí duele más: el registro de acciones es lo que un licenciatario enseña cuando alguien discute una decisión de la casa. Uno lleno de entradas que no ocurrieron no se lee, y el día que importe una se pasará por encima.
+
+**Decisión: compara la BASE, no la pantalla.** Habría sido más fácil que el frontend no llamara a la RPC si nada cambió, y habría sido el ADR-015 otra vez: la regla de «qué cuenta como un cambio» viviría en una pantalla, y la siguiente que llame a esa RPC tendría que acordarse de repetirla. `guardar_escaleras` calcula una firma del conjunto de tramos y, si coincide con la guardada, **no borra, no inserta y no deja asiento** — P69 lo comprueba verificando que los `id` de las filas no cambian. `editar_remate` no deja asiento cuando `v_cambios` viene vacío.
+
+**Y el asiento dice qué pasó, no cuánto.** Una línea por caballo **que haya cambiado**: `Caballo 5: sin escalera → 1 tramo (sube 75,00)`. La forma `{antes, despues}` no es casual: es la que `resumirDetalles` de `/admin/log` ya sabe pintar, así que no hubo que tocar el frontend.
+
+**Por qué no dice «cambió de suave a agresiva», que era lo que Jota pidió.** Porque la base no sabe que existe «suave»: el ritmo vive en `lib/escalera.ts` y es un **generador** — produce los tramos y desaparece. Comprobado: la palabra `ritmo` no aparece en ninguna migración. Guardar la etiqueta además de los tramos sería tener dos fuentes para el mismo hecho, y empezaría a mentir en cuanto alguien editara un tramo a mano (ADR-015). El asiento describe los tramos reales, que es lo que se puede afirmar siempre.
+
+**Lo que sigue sin registrarse, y no se arregla aquí.** Los cambios de un **caballo** —nombre, jinete, precio de salida, retirado, altas y bajas— son `UPDATE` directos desde el navegador: no hay trigger ni línea que escriba `admin_actions` por `horses`. Cambiar el precio de salida de un caballo no deja ningún rastro, y eso roza el dinero porque es lo que se lleva la casa si nadie puja por él. Para registrarlo hace falta `guardar_remate_completo`.
+
+**`editar_remate` se regeneró entera**, extraída de `20261002100000` con un script y parcheada en un solo sitio. No se retipea un cuerpo PL/pgSQL a mano: el 02/10 hacerlo perdió un `pg_advisory_xact_lock` e inventó un estado que no existe (ADR-021).
+
+**Consecuencias.** `P69`, siete condiciones, incluida la que da nombre al ADR: guardar las mismas escaleras no deja asiento **y no toca las filas**.
