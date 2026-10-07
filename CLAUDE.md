@@ -86,6 +86,7 @@ tests/
   concurrencia.sql    4 pruebas de carreras. Necesita que el arnes haya corrido antes
   fechas.mjs          31 comprobaciones de SelectorFechaHora  (pnpm test:fechas)
   log.mjs             32 comprobaciones de /admin/log          (pnpm test:log)
+  aviso_puja.mjs      31 comprobaciones del aviso de puja      (pnpm test:aviso)
 docs/supabase/
   COMO_APLICAR.md     el ciclo de migraciones. Leelo entero antes de la primera
   INSTALACION_LICENCIATARIO.md  alta de una instalacion nueva. OJO: ahi NO va

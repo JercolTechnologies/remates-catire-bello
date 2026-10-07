@@ -8,6 +8,7 @@ import { useParams } from "next/navigation"
 import { useSenal, topicoRemate, EVENTOS_REMATE } from "@/lib/realtime"
 import { supabase } from "@/lib/supabaseClient"
 import { CornerLogo } from "@/app/components/BrandLogo"
+import ConfirmarPuja, { cuentasDelAviso, type PujaPropuesta } from "@/app/components/ConfirmarPuja"
 
 type RemateRow = {
   id: string
@@ -94,6 +95,32 @@ function parseAmount(raw: string) {
   return Number(s)
 }
 
+// QUE PUJA INTENTA EL JUGADOR AHORA MISMO.
+//
+// Campo manual vacio -> la automatica, al minimo que publica la base. Con algo
+// escrito -> ese monto. Y devuelve el problema EN VIVO: hasta el 07/10 el aviso
+// de "muy poco" salia DESPUES de apretar el boton, como error rojo arriba de la
+// pantalla. El orden estaba al reves.
+//
+// Los dos minimos llegan de remate_minimos(); aqui no se calcula ninguno.
+function intencionDePuja(raw: string, minimoAuto: number, minimoManual: number) {
+  const t = String(raw ?? "").trim()
+  if (!t) return { monto: minimoAuto, esManual: false, problema: null as string | null }
+
+  const num = parseAmount(t)
+  if (!Number.isFinite(num)) {
+    return { monto: NaN, esManual: true, problema: "Ese monto no se entiende: escribe solo números." }
+  }
+  if (num < minimoManual) {
+    return {
+      monto: num,
+      esManual: true,
+      problema: `Muy poco: ahora el mínimo son ${formatMoney(minimoManual)} Bs.`,
+    }
+  }
+  return { monto: num, esManual: true, problema: null }
+}
+
 function formatMoney(v: string | number | null | undefined) {
   return n(v).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -157,6 +184,26 @@ export default function RemateDetallePage() {
   const [minimos, setMinimos] = useState<Record<string, MinimoRow>>({})
 
   const [manualByHorse, setManualByHorse] = useState<Record<string, string>>({})
+
+  // LO QUE EL JUGADOR QUISO HACER, y nada mas que eso.
+  //
+  // Aqui NO se guardan las cifras del aviso. Un remate esta vivo: entre que el
+  // cuadro se abre y el jugador aprieta, otro puede haber pujado. Si el precio
+  // viviera en este estado, el cuadro seguiria ensenando el viejo -- y en la
+  // puja automatica eso seria mentir, porque hacer_puja ignora el monto que
+  // manda la pantalla y cobra el minimo que exista en ese instante: el jugador
+  // confirmaria una cifra y le cobrarian otra.
+  //
+  // Asi que se guarda la intencion y las cifras se derivan de `minimos` en cada
+  // pintada. Llega una senal, se recargan los minimos, y el cuadro se corrige
+  // solo y lo avisa. null = ningun cuadro abierto.
+  const [propuestaBase, setPropuestaBase] = useState<{
+    horseId: string
+    monto: number
+    esManual: boolean
+    montoActualAlAbrir: number
+    minimoAutoAlAbrir: number
+  } | null>(null)
 
   async function load(isRefresh = false) {
     if (isRefresh) setRefreshing(true)
@@ -354,6 +401,44 @@ export default function RemateDetallePage() {
   const pctCasa = remate ? n(remate.porcentaje_casa) : 25
   const casaTotal = Math.round(pozoTotal * (pctCasa / 100) * 100) / 100
 
+  // EL AVISO, derivado de los minimos que hay AHORA. Ver el comentario de
+  // `propuestaBase` para el motivo.
+  const propuesta: PujaPropuesta | null = useMemo(() => {
+    if (!propuestaBase || !wallet) return null
+    const h = horsesById[propuestaBase.horseId]
+    if (!h) return null
+
+    const m = minimos[h.id]
+    const montoActual = m ? n(m.monto_actual) : n(h.precio_salida)
+    const minimoAuto = m ? n(m.minimo_auto) : montoActual
+    const soyLider = !!m?.soy_lider
+    const leader = computed.leaderByHorse[h.id]
+
+    return {
+      horseId: h.id,
+      numero: h.numero,
+      nombre: h.nombre,
+      hayPujas: m ? !!m.hay_pujas : false,
+      montoActual,
+      incremento: m ? n(m.incremento) : 0,
+      minimoAuto,
+      soyLider,
+      liderLabel: leader ? (leader.is_me ? "tú" : leader.username || "otro jugador") : "",
+      // La automatica sigue al minimo; la manual se queda en lo que el jugador
+      // escribio, y el cuadro le dira si se quedo corta.
+      monto: propuestaBase.esManual ? propuestaBase.monto : minimoAuto,
+      esManual: propuestaBase.esManual,
+      saldoTotal: n(wallet.saldo_disponible),
+      // Subir la propia puja la reemplaza, no la suma (misma cuenta que hacer_puja).
+      comprometidoSinEste: Math.max(0, n(wallet.comprometido) - (soyLider ? montoActual : 0)),
+      cambio:
+        montoActual !== propuestaBase.montoActualAlAbrir ||
+        minimoAuto !== propuestaBase.minimoAutoAlAbrir
+          ? "Alguien pujó mientras mirabas: las cifras cambiaron. Vuelve a revisarlas."
+          : undefined,
+    }
+  }, [propuestaBase, wallet, minimos, horsesById, computed])
+
   async function placeBid(horseId: string, monto: number, esManual: boolean) {
     if (!remate) return
     if (!userId) {
@@ -379,12 +464,23 @@ export default function RemateDetallePage() {
     // resta si es el lider AHORA. Por eso la pantalla decia que hacia falta
     // menos de lo que el servidor exigia, el usuario apretaba el boton y le
     // salia "Saldo insuficiente" sin entender por que. Defecto R4 del diseno.
+    //
+    // LA RESTA LA HACE cuentasDelAviso, la misma que el cuadro de confirmacion.
+    // Hacerla aqui a mano era tener dos veces la misma cuenta -- y la de aqui
+    // se hacia en bolivares con dobles, asi que con el saldo justo (1,10 +
+    // 2,20 contra 3,30) daba "Saldo insuficiente" por un error de redondeo que
+    // la base no comete, porque alla es numeric(12,2).
     const min = minimos[horseId]
-    const saldoTotal = wallet ? n(wallet.saldo_disponible) : 0
-    const comprometidoActual = wallet ? n(wallet.comprometido) : 0
+    const saldoTotal = n(wallet.saldo_disponible)
     const miPujaEnEste = min?.soy_lider ? n(min.monto_actual) : 0
-    const comprometidoSinEste = Math.max(0, comprometidoActual - miPujaEnEste)
-    if (saldoTotal < comprometidoSinEste + monto) {
+    const comprometidoSinEste = Math.max(0, n(wallet.comprometido) - miPujaEnEste)
+    const cuentas = cuentasDelAviso({
+      monto,
+      minimoAuto: min ? n(min.minimo_auto) : monto,
+      saldoTotal,
+      comprometidoSinEste,
+    })
+    if (!cuentas.alcanza) {
       setPlacing(null)
       setError(
         `Saldo insuficiente. Tienes ${formatMoney(saldoTotal)} Bs, ` +
@@ -408,29 +504,40 @@ export default function RemateDetallePage() {
     }
 
     setManualByHorse((prev) => ({ ...prev, [horseId]: "" }))
+    setPropuestaBase(null)
     await load(true)
     setNotice("Remate registrado.")
     setPlacing(null)
   }
 
-  async function handlePonerle(horseId: string, nextMin: number, manualMin: number) {
-    const raw = (manualByHorse[horseId] ?? "").trim()
-
-    if (raw) {
-      const manualNum = parseAmount(raw)
-      if (!Number.isFinite(manualNum)) {
-        setError("Monto manual invalido.")
-        return
-      }
-      if (manualNum < manualMin) {
-        setError(`Puja manual mínima: ${formatMoney(manualMin)} Bs`)
-        return
-      }
-      await placeBid(horseId, manualNum, true)
+  // ABRIR EL AVISO. No puja: registra lo que el jugador quiere hacer para que
+  // el cuadro se lo ensene y el decida.
+  function abrirPropuesta(
+    h: HorseRow,
+    m: MinimoRow | undefined,
+    intencion: { monto: number; esManual: boolean }
+  ) {
+    if (!userId) {
+      setError("Debes iniciar sesión para pujar.")
       return
     }
+    if (!wallet) {
+      setError("No se pudo cargar tu wallet.")
+      return
+    }
+    if (!Number.isFinite(intencion.monto)) return
 
-    await placeBid(horseId, nextMin, false)
+    setError("")
+    setNotice("")
+
+    const montoActual = m ? n(m.monto_actual) : n(h.precio_salida)
+    setPropuestaBase({
+      horseId: h.id,
+      monto: intencion.monto,
+      esManual: intencion.esManual,
+      montoActualAlAbrir: montoActual,
+      minimoAutoAlAbrir: m ? n(m.minimo_auto) : montoActual,
+    })
   }
 
   if (loading) {
@@ -636,6 +743,62 @@ export default function RemateDetallePage() {
                 const manualMin = m ? n(m.minimo_manual) : nextMin
                 const disabled = !canBid || placing === h.id || isRetirado
 
+                // Lo que se intenta pujar, y si hay algo mal, AHORA, no despues
+                // de apretar.
+                const intencion = intencionDePuja(manual, nextMin, manualMin)
+
+                // UN SOLO bloque de accion para las dos maquetas. Antes habia
+                // dos copias del mismo formulario -- movil y escritorio -- y
+                // tocaba acordarse de cambiar las dos.
+                const accion = isRetirado ? (
+                  <div className="text-[11px] text-red-300">Caballo retirado</div>
+                ) : isAdmin ? (
+                  <div className="text-[11px] text-zinc-500">Solo lectura (admin)</div>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <input
+                        inputMode="decimal"
+                        value={manual}
+                        disabled={disabled}
+                        onChange={(e) => setManualByHorse((prev) => ({ ...prev, [h.id]: e.target.value }))}
+                        placeholder={`Ofrecer más (desde ${formatMoney(manualMin)})`}
+                        className="w-full rounded-xl bg-zinc-950/60 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/10 disabled:opacity-60"
+                      />
+                      <button
+                        disabled={disabled || !!intencion.problema}
+                        onClick={() => abrirPropuesta(h, m, intencion)}
+                        className="w-full rounded-xl bg-white text-zinc-950 font-semibold px-3 py-2 text-sm leading-tight disabled:opacity-60"
+                      >
+                        {placing === h.id ? (
+                          "Pujando..."
+                        ) : intencion.problema ? (
+                          "Ponerle"
+                        ) : (
+                          <>
+                            Ponerle
+                            <span className="block text-xs font-bold tabular-nums">
+                              {formatMoney(intencion.monto)} Bs
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div
+                      className={`mt-1 text-[11px] ${
+                        intencion.problema ? "text-red-300" : "text-zinc-500"
+                      }`}
+                    >
+                      {intencion.problema
+                        ? intencion.problema
+                        : intencion.esManual
+                        ? `Mínimo ahora: ${formatMoney(manualMin)} Bs`
+                        : "Te preguntamos antes de registrarla."}
+                    </div>
+                  </>
+                )
+
                 return (
                     <div key={h.id} className="border-b border-zinc-800 last:border-b-0">
                       <div className="md:hidden grid grid-cols-[52px_1fr_140px]">
@@ -657,37 +820,7 @@ export default function RemateDetallePage() {
                           </div>
                         </div>
 
-                        <div className="px-3 pb-4 col-start-2 col-span-2">
-                          {isRetirado ? (
-                            <div className="text-[11px] text-red-300">Caballo retirado</div>
-                          ) : isAdmin ? (
-                            <div className="text-[11px] text-zinc-500">Solo lectura (admin)</div>
-                          ) : (
-                            <>
-                              <div className="flex gap-2 items-center">
-                                <input
-                                  inputMode="decimal"
-                                  value={manual}
-                                  disabled={disabled}
-                                  onChange={(e) => setManualByHorse((prev) => ({ ...prev, [h.id]: e.target.value }))}
-                                  placeholder="Monto manual"
-                                  className="w-32 rounded-xl bg-zinc-950/60 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/10 disabled:opacity-60"
-                                />
-                                <button
-                                  disabled={disabled}
-                                  onClick={() => void handlePonerle(h.id, nextMin, manualMin)}
-                                  className="shrink-0 rounded-xl bg-white text-zinc-950 font-semibold px-4 py-2 text-sm disabled:opacity-60"
-                                >
-                                  {placing === h.id ? "Rematando..." : "Ponerle"}
-                                </button>
-                              </div>
-
-                              <div className="mt-1 text-[11px] text-zinc-500">
-                                Puja manual mínima: {formatMoney(manualMin)} Bs
-                              </div>
-                            </>
-                          )}
-                        </div>
+                        <div className="px-3 pb-4 col-start-2 col-span-2">{accion}</div>
                       </div>
 
                     <div className="hidden md:grid grid-cols-[60px_1.4fr_1fr_1fr_1.6fr]">
@@ -702,36 +835,7 @@ export default function RemateDetallePage() {
                           {isRetirado ? "Retirado" : leaderLabel}
                         </div>
                       </div>
-                      <div className="px-4 py-4">
-                        {isRetirado ? (
-                          <div className="text-xs text-red-300">Caballo retirado</div>
-                        ) : isAdmin ? (
-                          <div className="text-xs text-zinc-500">Solo lectura (admin)</div>
-                        ) : (
-                          <div className="flex items-start gap-2">
-                            <div className="flex-1">
-                              <input
-                                inputMode="decimal"
-                                value={manual}
-                                disabled={disabled}
-                                onChange={(e) => setManualByHorse((prev) => ({ ...prev, [h.id]: e.target.value }))}
-                                placeholder="Monto manual"
-                                className="w-full rounded-xl bg-zinc-950/60 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/10 disabled:opacity-60"
-                              />
-                              <div className="mt-1 text-[11px] text-zinc-500">
-                                Puja manual mínima: {formatMoney(manualMin)} Bs
-                              </div>
-                            </div>
-                            <button
-                              disabled={disabled}
-                              onClick={() => void handlePonerle(h.id, nextMin, manualMin)}
-                              className="rounded-xl bg-white text-zinc-950 font-semibold px-4 py-2 text-sm disabled:opacity-60"
-                            >
-                              {placing === h.id ? "Rematando..." : "Ponerle"}
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      <div className="px-4 py-4">{accion}</div>
                     </div>
                   </div>
                 )
@@ -776,6 +880,15 @@ export default function RemateDetallePage() {
         </div>
       </div>
       </main>
+
+      {propuesta ? (
+        <ConfirmarPuja
+          propuesta={propuesta}
+          enviando={placing === propuesta.horseId}
+          onConfirmar={() => void placeBid(propuesta.horseId, propuesta.monto, propuesta.esManual)}
+          onCancelar={() => setPropuestaBase(null)}
+        />
+      ) : null}
     </>
   )
 }

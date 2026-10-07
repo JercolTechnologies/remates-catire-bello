@@ -12,7 +12,8 @@
     "db:reset": "npx -y supabase@2.118.0 db reset",
     "db:push:produccion": "npx -y supabase@2.118.0 db push",
     "test:fechas": "node tests/fechas.mjs",
-    "test:log": "node tests/log.mjs"
+    "test:log": "node tests/log.mjs",
+    "test:aviso": "node tests/aviso_puja.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",

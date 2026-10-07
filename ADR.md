@@ -824,3 +824,31 @@ Se eligió una marca y no una tabla `remates_vistos (user_id, remate_id)`: la ta
 **Consecuencias.** `P66` mide que lo anterior a tu marca no cuenta, que el contador es **por usuario** —una prueba que mirara a uno solo pasaría aunque la marca fuera global— y que mirar lo pone a cero.
 
 **Y una trampa que mordió por tercera vez.** `now()` en PostgreSQL es la hora de la **transacción**, no del reloj: dentro de un `do $$` todo comparte instante, así que un remate creado «después» de marcar tiene el mismo `created_at` que la marca y `>` da falso. Dormir no arregla nada porque la hora no avanza. Ya había pasado en P56 el 01/10 y en P61 anteayer. **La forma de escribir una prueba que dependa del orden temporal es mover las marcas explícitamente, nunca esperar a que pase el tiempo.**
+
+---
+
+## ADR-035 · El precio se dice antes de cobrarlo, no después
+
+**Fecha.** 7 de octubre de 2026 *(solo frontend: `app/components/ConfirmarPuja.tsx`, `app/remates/[id]/page.tsx`, `tests/aviso_puja.mjs`)*
+
+**Contexto.** Jota, sobre el aviso del incremento: *«ahí el usuario decide si puja con el incremento o lo deja ahí»*. El aviso existía, pero llegaba tarde.
+
+Lo que había: el botón decía **«Ponerle»**, sin cifra. El jugador leía «Va ganando 1.500 Bs», apretaba, y quedaba comprometido con 1.650 Bs sin que nadie le hubiera dicho nunca ese número. El único sitio donde aparecía era un renglón gris de 11 px rotulado *«Puja manual mínima»*, debajo del campo de monto manual: se lee como la etiqueta de ese campo, no como el precio del botón de al lado. Y si el monto escrito a mano no llegaba al mínimo, el aviso salía **después** de apretar, como error rojo arriba de la pantalla.
+
+Peor: `app/reglas/page.tsx` ya prometía, textual, que *«el mínimo siguiente siempre está a la vista antes de pujar»*. La pantalla no cumplía su propia letra pequeña.
+
+**Decisión.** Tres cambios, ninguno en la base:
+
+1. **El botón dice el precio.** «Ponerle / 1.650,00 Bs» en dos líneas.
+2. **Un cuadro de confirmación que enseña la cuenta**, no que pregunta «¿estás seguro?»: precio actual y quién va ganando, incremento, total, y cómo queda el saldo después. Los botones son «Pujar 1.650,00 Bs» y **«Dejarlo así»** —las palabras de Jota.
+3. **El problema del monto manual se dice mientras se escribe**, en rojo bajo el campo, con el botón desactivado. Nunca después del intento.
+
+**Lo que no se toca: la regla sigue siendo de la base.** Cada cifra del cuadro llega de `remate_minimos()`. La única aritmética del frontend es sumar lo que la base ya dijo para enseñar el saldo resultante (ADR-008, ADR-015).
+
+**El cuadro no guarda las cifras, las deriva.** Primera versión: el estado guardaba precio e incremento al abrirse, y un `useEffect` los corregía cuando llegaba señal. Mal por dos motivos. Uno de estilo —`setState` dentro de un efecto, que el propio linter de React marca—. El otro de fondo: **en la puja automática `hacer_puja` ignora el monto que manda la pantalla** y cobra `v_minimo_permitido`, el mínimo que exista en ese instante. Un cuadro con cifras congeladas haría que el jugador confirme 1.650 y le cobren 1.800. Ahora el estado guarda **solo la intención** (qué caballo, cuánto quiso ofrecer, si fue manual) y el cuadro se recalcula de `minimos` en cada pintada: si alguien pujó mientras miraba, las cifras se corrigen solas y el cuadro lo dice.
+
+**La aritmética va en céntimos enteros.** En la base el dinero es `numeric(12,2)`, exacto. En JavaScript son dobles: `1,10 + 2,20` da `3,3000000000000003`, así que con 3,30 de saldo justo la comprobación `saldo < comprometido + puja` daba **«Saldo insuficiente»** y botón desactivado a alguien a quien la base se lo habría aceptado. Y el «te faltan» salía `-0,00 Bs`. Pasar a céntimos antes de sumar hace que esta cuenta sea la misma que la de la base, al céntimo. **No era un error teórico: la resta a mano que vivía en `placeBid` lo tenía desde el primer día** y ahora usa la misma función que el cuadro.
+
+**Una sola implementación del formulario.** Móvil y escritorio tenían **dos copias** del input, el botón y el renglón de ayuda. El ADR-015 habla de DB contra frontend, pero la lección es la misma dentro de un archivo: ahora el bloque de acción se construye una vez y las dos maquetas lo pintan.
+
+**Consecuencias.** `tests/aviso_puja.mjs`, 31 comprobaciones (`pnpm test:aviso`), que transpila los archivos reales y ejecuta sus funciones —sin copias, mismo método que `tests/fechas.mjs`—. Cubre el caso que no se ve mirando: **el jugador que ya lidera el caballo**, donde subir la propia puja la *reemplaza* y no la suma. Ese error ya se cometió aquí una vez (defecto R4: se restaba la puja más alta histórica en vez de la que lidera ahora) y ahora hay una prueba que falla si vuelve.

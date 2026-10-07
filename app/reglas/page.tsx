@@ -149,7 +149,9 @@ export default function ReglasPage() {
               <li>
                 Cada caballo sube según el incremento de su remate, o según su propia escalera de
                 tramos si el organizador se la puso. El mínimo siguiente siempre está a la vista
-                antes de pujar.
+                antes de pujar: el botón lleva escrita la cifra exacta, y al apretarlo sale un
+                aviso con el precio actual, el incremento, el total y cómo te queda el saldo.
+                Nada se registra hasta que lo confirmas ahí.
               </li>
             </ul>
           </Bloque>
