@@ -875,13 +875,37 @@ export default function AdminRemateDetailPage() {
         }
       }
 
-      const { error: rulesDelErr } = await supabase.from("remate_price_rules").delete().eq("remate_id", remate.id)
-      if (rulesDelErr) throw new Error(rulesDelErr.message)
-
-      if (rulesPayload.length > 0) {
-        const { error: rulesInsErr } = await supabase.from("remate_price_rules").insert(rulesPayload)
-        if (rulesInsErr) throw new Error(rulesInsErr.message)
-      }
+      // UNA SOLA LLAMADA, Y UNA SOLA TRANSACCION. (07/10/2026)
+      //
+      // Aqui habia un `delete` de TODAS las escaleras del remate y un `insert`
+      // de las nuevas, en dos llamadas sueltas. Entre las dos el remate se
+      // quedaba sin ninguna escalera, EN VIVO, y desde ese instante todos los
+      // caballos subian con `remates.incremento_minimo` en vez de la escalera
+      // configurada.
+      //
+      // Y lo peor no era la perdida: era que el `catch` de abajo ensenaba
+      // "Error guardando cambios" y el admin deducia que no se habia tocado
+      // nada, cuando el borrado ya estaba hecho.
+      //
+      // Ahora lo hace guardar_escaleras(), que es una transaccion: si una
+      // escalera nueva no pasa una guarda, las VIEJAS siguen ahi. Lo mide P68.
+      // Ver 20261007150000_guardar_escaleras.sql.
+      //
+      // Y desde esa misma migracion `authenticated` ya no tiene insert, update
+      // ni delete sobre `remate_price_rules`: esta RPC es la unica puerta. Si
+      // alguien vuelve a poner aqui un .insert() directo, dejara de funcionar
+      // en vez de funcionar a medias.
+      const { error: escErr } = await supabase.rpc("guardar_escaleras", {
+        p_remate_id: remate.id,
+        // `remate_id` no viaja: lo pone la RPC desde su propio parametro.
+        p_reglas: rulesPayload.map((r) => ({
+          horse_id: r.horse_id,
+          min_precio: r.min_precio,
+          max_precio: r.max_precio,
+          incremento: r.incremento,
+        })),
+      })
+      if (escErr) throw new Error(escErr.message)
 
       setOk("Cambios guardados.")
       await loadAll(true)

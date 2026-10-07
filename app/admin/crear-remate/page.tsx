@@ -600,25 +600,28 @@ export default function AdminCrearRematePage() {
   }
 
   // =========================
-  // Guardar TODO (race -> remate -> horses)
-  // NOTA IMPORTANTE:
-  // Sin RPC transaccional, esto NO es atómico:
-  // si falla horses, ya quedan creados race/remate y los borras manual.
+  // GUARDAR TODO, EN UNA SOLA TRANSACCION
+  //
+  // Desde el 07/10 esto es UNA llamada a crear_remate_completo(). Antes eran
+  // cinco sueltas y un fallo a mitad dejaba basura: ver el comentario de
+  // dentro y 20261007130000_crear_remate_completo.sql.
   // =========================
   async function onCreate() {
-    // IDEMPOTENCIA, A LA BRUTA Y A PROPOSITO.
+    // EL DOBLE CLIC SIGUE SIENDO COSA DEL CLIENTE, Y HAY QUE SABERLO.
     //
     // Jota lo encontro asi: "al crearse un remate, el boton de crear remate
     // queda activo y si le doy 20 veces mas, crea 20 remates con el mismo
-    // nombre y los mismos datos". Cierto, y era peor: si fallaba el insert de
-    // caballos, la carrera y el remate YA quedaban creados, porque son tres
-    // inserts sueltos y no una transaccion.
+    // nombre y los mismos datos".
     //
-    // Esta guarda tapa el doble clic, que es el sintoma que muerde hoy. El
-    // arreglo de fondo -- un RPC `crear_remate_completo` que haga las cuatro
-    // escrituras en una transaccion, con clave de idempotencia -- es la tanda
-    // siguiente. Se deja escrito aqui para que no se olvide: mientras esto sea
-    // tres inserts, un fallo a mitad deja basura en la base.
+    // La transaccion arregla el fallo A MITAD, no el doble clic: dos clics son
+    // dos llamadas completas y correctas, y la base crea dos remates porque no
+    // tiene forma de saber que es el mismo. Estas dos guardas siguen siendo la
+    // unica defensa, y son del navegador: si el admin recarga y reenvia, pasa
+    // igual.
+    //
+    // Lo que falta para cerrarlo de verdad es una clave de idempotencia que
+    // viaje en el payload con un indice unico detras. Queda apuntado, no
+    // hecho: el 07/10 se decidio que esta migracion fuera UNA sola cosa.
     if (saving) return
     if (createdRemateId) {
       setError("Este remate ya se creó. Recarga la página si quieres crear otro.")
@@ -645,149 +648,99 @@ export default function AdminCrearRematePage() {
       const aid = await ensureAdmin()
       if (!aid) return
 
-      // 1) Crear Carrera (races)
+      // UNA SOLA LLAMADA. (07/10/2026, pendiente 1.1)
+      //
+      // Aqui habia CINCO llamadas, y cada una era su propia transaccion ya
+      // confirmada: insert en races, insert en remates, insert en horses,
+      // select en horses para recuperar los ids, insert en remate_price_rules.
+      // Si fallaba la tercera, las dos primeras estaban en disco y este
+      // `catch` hacia exactamente una cosa: setError(). Ni un delete.
+      //
+      // Medido en el arnes, con el admin repitiendo el numero 5: quedaba una
+      // carrera huerfana, un remate ABIERTO con cero caballos, y la senal del
+      // ADR-031 ya emitida -- el remate roto empujado a la pantalla de todos
+      // los jugadores conectados.
+      //
+      // Ahora es una funcion PL/pgSQL, o sea una transaccion. Si algo revienta
+      // -- un numero repetido, un incremento por debajo del minimo de la
+      // instalacion, cualquier cosa -- no queda nada escrito y no sale
+      // ninguna senal. Ver 20261007130000_crear_remate_completo.sql y P67.
+      //
+      // El paso del `select` para recuperar los ids de los caballos ya no
+      // existe: las escaleras viajan COLGANDO de su caballo dentro del
+      // payload, y la base usa `insert ... returning`.
       const numeroCarreraText = raceNumeroCarreraText.trim()
       const numeroCarreraNum =
         numeroCarreraText && Number.isFinite(Number(numeroCarreraText)) ? Number(numeroCarreraText) : null
 
-      const raceInsert: any = {
-        nombre: raceDescripcion.trim(),
-        fecha: raceFechaISO,
-        estado: "programada",
-        dia: raceDia.trim(),
-        distancia_m: n(raceDistancia),
-        numero_carrera_text: numeroCarreraText || null,
-      }
-
-      // hipodromo / numero_carrera / hora_programada son nullables (seg?n tu schema)
-      raceInsert.hipodromo = raceHipodromo.trim() ? raceHipodromo.trim() : null
-      raceInsert.numero_carrera = numeroCarreraNum
-      raceInsert.hora_programada = raceHora24 ? raceHora24 : null
-
-      const { data: raceData, error: raceErr } = await supabase
-        .from("races")
-        .insert(raceInsert)
-        .select("id")
-        .single()
-
-      if (raceErr) throw new Error(raceErr.message)
-      const raceId = raceData.id as string
-      setCreatedRaceId(raceId)
-
-      // 2) Crear Remate (remates) para esa carrera
       const remateNombreInterno =
         raceDescripcion.trim() ||
         (raceHipodromo.trim()
           ? `Remate ${raceHipodromo.trim()}`
           : `Remate ${numeroCarreraText || ""}`.trim())
 
-      const remateInsert: any = {
-        race_id: raceId,
-        nombre: remateNombreInterno,
-        estado: "abierto",
-        incremento_minimo: n(incrementoMinimo),
-        porcentaje_casa: n(porcentajeCasa),
-        tipo: remateTipo,
-        opens_at: buildCaracasTs(opensDateISO, opensTime24),
-        closes_at: buildCaracasTs(closesDateISO, closesTime24),
-      }
-
-      const { data: remateData, error: remErr } = await supabase
-        .from("remates")
-        .insert(remateInsert)
-        .select("id")
-        .single()
-
-      if (remErr) throw new Error(remErr.message)
-      const remateId = remateData.id as string
-      setCreatedRemateId(remateId)
-
-      // 3) Insertar caballos (horses) asociados a la carrera
-      const horsesPayload = horses.map((h) => {
-        const obj: any = {
-          race_id: raceId,
-          numero: Number(h.numero),
-          nombre: h.nombre.trim(),
-          jinete: h.jinete.trim() ? h.jinete.trim() : null,
-          precio_salida: n(h.precio_salida),
-          comentarios: h.comentarios.trim() ? h.comentarios.trim() : null,
-        }
-
-        // precio_salida: lo mandamos SOLO si lo llenaron (para no romper si en algún ambiente no existe)
-        // precio_salida ya va en el payload (obligatorio)
-
-        return obj
-      })
-
-      const { error: horsesErr } = await supabase.from("horses").insert(horsesPayload)
-      if (horsesErr) throw new Error(horsesErr.message)
-
-      // 4) Insertar reglas de precios (default y por caballo)
-      const horseIdByTemp: Record<string, string> = {}
-      if (horsesPayload.length > 0) {
-        const { data: insertedHorses, error: hsErr } = await supabase
-          .from("horses")
-          .select("id,numero")
-          .eq("race_id", raceId)
-
-        if (hsErr) throw new Error(hsErr.message)
-
-        const byNumero = new Map<number, string>()
-        ;(insertedHorses ?? []).forEach((row: any) => {
-          if (row?.numero != null) byNumero.set(Number(row.numero), row.id)
-        })
-
-        horses.forEach((h) => {
-          const id = byNumero.get(Number(h.numero))
-          if (id) horseIdByTemp[h.tempId] = id
-        })
-      }
-
-      const rulesPayload: any[] = []
-
       // LA ESCALERA GENERAL NO EXISTE EN LA BASE (30/09/2026).
       //
-      // Hasta hoy esto escribia filas con `horse_id: null`, una escalera
-      // "general" del remate. Y esa fila le ganaba a `remates.incremento_minimo`
-      // dentro de _incremento_aplicable(), asi que cambiar el incremento con
-      // editar_remate no surtia efecto en los caballos sin escalera propia: el
-      // admin cambiaba el numero, la pantalla se lo confirmaba, y la base
-      // cobraba otra cosa. Dos fuentes para el mismo valor, y mandaba la que no
-      // se ve. ADR-015.
-      //
-      // La escalera general SIGUE existiendo aqui, en el formulario, porque es
-      // un atajo comodo: configura doce caballos de un golpe. Lo que cambia es
-      // que al guardar se EXPANDE a una escalera identica por caballo, con su
-      // horse_id. En la base hay una sola clase de regla, y lo que el admin ve
-      // en la pantalla de edicion es exactamente lo que se va a aplicar.
-      //
-      // Aqui ya NO se expande ninguna escalera general. Un caballo sin reglas
-      // propias no recibe ninguna fila en remate_price_rules, y por eso la base
-      // le aplica `remates.incremento_minimo`. Esa es toda la regla general.
+      // Sigue existiendo en ESTE formulario, porque es un atajo comodo para
+      // configurar doce caballos de un golpe, pero al guardar no se escribe
+      // como una regla con `horse_id` nulo: un caballo sin escalera propia no
+      // recibe ninguna fila, y por eso la base le aplica
+      // `remates.incremento_minimo`. Esa es toda la regla general.
       //
       // `remate_price_rules.horse_id` es NOT NULL desde la migracion
       // 20260930100000, asi que una regla sin caballo es imposible de escribir.
-      for (const h of horses) {
-        if (!horseRulesEnabled[h.tempId]) continue
-        const horseId = horseIdByTemp[h.tempId]
-        if (!horseId) continue
-        const list = horseRulesByTempId[h.tempId] || []
-        for (const r of list) {
-          if (!r.min_precio.trim() || !r.incremento.trim()) continue
-          rulesPayload.push({
-            remate_id: remateId,
-            horse_id: horseId,
-            min_precio: n(r.min_precio),
-            max_precio: r.max_precio.trim() ? n(r.max_precio) : null,
-            incremento: n(r.incremento),
-          })
-        }
-      }
+      const caballosPayload = horses.map((h) => {
+        const reglas = horseRulesEnabled[h.tempId]
+          ? (horseRulesByTempId[h.tempId] || [])
+              .filter((r) => r.min_precio.trim() && r.incremento.trim())
+              .map((r) => ({
+                min_precio: n(r.min_precio),
+                max_precio: r.max_precio.trim() ? n(r.max_precio) : null,
+                incremento: n(r.incremento),
+              }))
+          : []
 
-      if (rulesPayload.length > 0) {
-        const { error: rulesErr } = await supabase.from("remate_price_rules").insert(rulesPayload)
-        if (rulesErr) throw new Error(rulesErr.message)
-      }
+        return {
+          numero: Number(h.numero),
+          nombre: h.nombre.trim(),
+          jinete: h.jinete.trim() ? h.jinete.trim() : null,
+          entrenador: null,
+          comentarios: h.comentarios.trim() ? h.comentarios.trim() : null,
+          precio_salida: n(h.precio_salida),
+          reglas,
+        }
+      })
+
+      const { data: creado, error: rpcErr } = await supabase.rpc("crear_remate_completo", {
+        p_carrera: {
+          nombre: raceDescripcion.trim(),
+          hipodromo: raceHipodromo.trim() ? raceHipodromo.trim() : null,
+          numero_carrera: numeroCarreraNum,
+          numero_carrera_text: numeroCarreraText || null,
+          fecha: raceFechaISO,
+          hora_programada: raceHora24 ? raceHora24 : null,
+          dia: raceDia.trim() ? raceDia.trim() : null,
+          distancia_m: n(raceDistancia),
+        },
+        p_remate: {
+          nombre: remateNombreInterno,
+          incremento_minimo: n(incrementoMinimo),
+          porcentaje_casa: n(porcentajeCasa),
+          tipo: remateTipo,
+          opens_at: buildCaracasTs(opensDateISO, opensTime24),
+          closes_at: buildCaracasTs(closesDateISO, closesTime24),
+        },
+        p_caballos: caballosPayload,
+      })
+
+      if (rpcErr) throw new Error(rpcErr.message)
+
+      // `returns table` llega como un arreglo de una fila.
+      const fila = Array.isArray(creado) ? creado[0] : creado
+      if (!fila?.id_remate) throw new Error("La base no devolvio el remate creado.")
+
+      setCreatedRaceId(String(fila.id_carrera))
+      setCreatedRemateId(String(fila.id_remate))
 
       setOk("Listo. Carrera, remate y caballos creados.")
     } catch (e: any) {

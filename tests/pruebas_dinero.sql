@@ -2740,6 +2740,8 @@ begin
       ('cancelar_remate',                 'auth'),
       ('casa_resumen',                    'auth'),
       ('cerrar_remate',                   'auth'),
+      ('crear_remate_completo',           'auth'),
+      ('guardar_escaleras',               'auth'),
       ('editar_remate',                   'auth'),
       ('hacer_puja',                      'auth'),
       ('liquidar_remate',                 'auth'),
@@ -2938,12 +2940,14 @@ begin
       ('admin_actions',      'select',                        ''),
       ('house_ledger',       'select',                        ''),
       ('notificaciones',     'select',                        ''),
-      -- catalogo del remate: lo escribe la pantalla de admin HASTA LA TANDA 4,
-      -- cuando existan crear_remate_completo() y guardar_remate_completo().
-      -- Ese dia estas cuatro bajan a 'select' y se quitan del panel a la vez.
+      -- catalogo del remate. `remate_price_rules` YA BAJO (07/10): crear pasa
+      -- por crear_remate_completo() y editar por guardar_escaleras(), las dos
+      -- SECURITY DEFINER, y nadie la escribe directo. Las otras tres siguen
+      -- abiertas porque la pantalla de editar todavia las escribe; bajan el dia
+      -- que exista guardar_remate_completo(), y se quitan del panel a la vez.
       ('horses',             'select,insert,update,delete',   'select'),
       ('races',              'select,insert,update,delete',   'select'),
-      ('remate_price_rules', 'select,insert,update,delete',   'select'),
+      ('remate_price_rules', 'select',                        'select'),
       ('support_settings',   'select,insert,update,delete',   'select'),
       -- ajustes de ESTA instalacion: el panel de admin los lee para avisar
       -- antes de guardar; solo el super admin cambia valores. Sin insert y
@@ -4972,6 +4976,455 @@ begin
 exception when others then
   perform _p.anotar(66, 'Nuevo quiere decir nuevo para ti',
     'ver arriba', false, 'excepcion (' || sqlstate || '): ' || sqlerrm);
+end $$;
+
+
+
+-- ============================================================================
+--  P67 - Crear un remate es atomico: o entra todo, o no entra nada
+--
+--  EL DEFECTO QUE EXISTE PARA IMPEDIR. Hasta el 07/10 crear un remate eran
+--  cinco llamadas sueltas desde el navegador, cada una su propia transaccion
+--  ya confirmada. Medido, con el admin repitiendo el numero 5: quedaba una
+--  carrera huerfana, un remate 'abierto' con CERO caballos, y una senal ya
+--  emitida a remates:lista -- el remate roto empujado a la pantalla de todos
+--  los jugadores conectados (ADR-031).
+--
+--  Esa via vieja no se puede reproducir dentro de un `do $$`, porque un bloque
+--  es UNA transaccion y el defecto era tener cinco. La medicion quedo en la
+--  cabecera de 20261007130000. Lo que esta prueba verifica es la via nueva:
+--  que ningun rechazo deje nada escrito.
+--
+--  LO QUE MIDE
+--   1. el camino bueno escribe las cuatro tablas, cuelga cada escalera de SU
+--      caballo, deja asiento en la bitacora y emite UNA senal
+--   2. un fallo en el paso de las REGLAS -- el criterio de aceptacion del
+--      pendiente 1.1 -- no deja ni carrera, ni remate, ni caballos, ni senal.
+--      Se prueba de las dos formas que pueden fallar ahi:
+--        2a. una guarda de negocio (trg_minimo_incremento_regla) -> P0001
+--        2b. un NOT NULL de la tabla                              -> 23502
+--   3. numeros repetidos: rechaza con P0001 -- nuestra frase, no el 23505 en
+--      crudo -- y tampoco deja nada
+--   4. sin caballos: rechaza
+--   5. un jugador no puede llamarla
+--
+--  REGLA DEL 28/09: cuando el exito es "salto una excepcion", se comprueba
+--  CUAL. P0001 es nuestro codigo rechazando a proposito; 42883 seria que la
+--  migracion no esta aplicada y la prueba no probaria nada.
+--
+--  DOS COSAS QUE SE APRENDIERON ESCRIBIENDO ESTA PRUEBA, Y VALEN PARA TODAS:
+--
+--  * UNA PRUEBA NO HEREDA LOS AJUSTES DE LA INSTALACION, LOS FIJA. La primera
+--    version daba por hecho que `minimo_incremento` valia 50, que es el valor
+--    de fabrica. Cuando P67 corre dentro del archivo completo, vale 1: alguna
+--    prueba anterior lo dejo ahi. El incremento 10 que debia rebotar pasaba
+--    tranquilamente, la fase no probaba nada, y el motivo no se veia. Aqui se
+--    fija a mano y se devuelve al final.
+--
+--  * UNA VARIABLE POR FASE, NO UNA COMPARTIDA. `v_basura` se reusaba en las
+--    cuatro fases, asi que el detalle imprimia el valor de la ULTIMA y decia
+--    "basura=0" de una fase que habia escrito cinco filas. La prueba fallaba
+--    con razon y el mensaje mentia sobre el motivo.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid; v_juan uuid;
+  v_existe boolean;
+  v_race uuid; v_remate uuid; v_cab int; v_reg int;
+
+  v_carrera jsonb; v_remate_j jsonb; v_min_previo text;
+
+  -- Una variable por fase. Compartirlas fue el motivo de que el detalle
+  -- mintiera la primera vez.
+  v_sql_a text; v_msg_a text; v_basura_a int; v_senal_a int;
+  v_sql_b text; v_msg_b text; v_basura_b int;
+  v_sql_c text; v_msg_c text; v_basura_c int;
+  v_sql_d text; v_basura_d int;
+  v_sql_e text; v_basura_e int;
+
+  v_bueno_ok boolean := false;
+  v_senal_buena int;
+  v_en_bitacora boolean := false;
+  v_falla_guarda_ok boolean := false;
+  v_falla_notnull_ok boolean := false;
+  v_repetido_ok boolean := false;
+  v_sin_caballos_ok boolean := false;
+  v_jugador_ok boolean := false;
+begin
+  perform _p.limpiar();
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'crear_remate_completo'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(67, 'Crear un remate es atomico',
+      'crear_remate_completo() existe y ningun rechazo deja basura',
+      false, 'crear_remate_completo NO EXISTE: la migracion 20261007130000 no esta aplicada');
+    return;
+  end if;
+
+  -- LA PRUEBA FIJA SUS PRECONDICIONES. Ver la cabecera.
+  select valor into v_min_previo from public.ajustes_instalacion where clave = 'minimo_incremento';
+  update public.ajustes_instalacion set valor = '50' where clave = 'minimo_incremento';
+
+  v_admin := _p.usuario('jefa', 0, true);
+  v_juan  := _p.usuario('juan', 1000, false);
+
+  v_carrera := jsonb_build_object(
+    'nombre', 'La Rinconada - Carrera 3', 'hipodromo', 'La Rinconada',
+    'numero_carrera', 3, 'numero_carrera_text', '3',
+    'fecha', current_date::text, 'hora_programada', '16:30',
+    'dia', 'Sabado', 'distancia_m', 1600);
+
+  v_remate_j := jsonb_build_object(
+    'nombre', 'Remate C3', 'incremento_minimo', 50,
+    'porcentaje_casa', 25, 'tipo', 'vivo');
+
+  -- ------------------------------------------------------- 1) camino bueno
+  delete from realtime.messages;
+  perform _p.actuar_como(v_admin);
+
+  select c.id_carrera, c.id_remate, c.n_caballos, c.n_reglas
+    into v_race, v_remate, v_cab, v_reg
+  from public.crear_remate_completo(
+    v_carrera, v_remate_j,
+    jsonb_build_array(
+      jsonb_build_object('numero', 1, 'nombre', 'Relampago', 'jinete', 'J. Perez',
+        'precio_salida', 100,
+        'reglas', jsonb_build_array(
+          jsonb_build_object('min_precio', 100, 'max_precio', 500, 'incremento', 50),
+          jsonb_build_object('min_precio', 500, 'max_precio', null, 'incremento', 100))),
+      jsonb_build_object('numero', 2, 'nombre', 'Trueno', 'jinete', 'M. Lopez',
+        'precio_salida', 150)
+    )
+  ) c;
+
+  select count(*) into v_senal_buena from realtime.messages where topic = 'remates:lista';
+
+  v_bueno_ok :=
+        v_race is not null and v_remate is not null
+    and v_cab = 2 and v_reg = 2
+    and (select count(*) from public.horses h where h.race_id = v_race) = 2
+    and (select count(*) from public.remate_price_rules r where r.remate_id = v_remate) = 2
+    -- las dos reglas cuelgan del caballo 1, no del primero que pillo
+    and (select count(*) from public.remate_price_rules r
+           join public.horses h on h.id = r.horse_id
+          where r.remate_id = v_remate and h.numero = 1) = 2
+    and v_senal_buena = 1;
+
+  select exists (
+    select 1 from public.admin_actions a
+    where a.action = 'crear_remate_completo' and a.target_id = v_remate::text
+  ) into v_en_bitacora;
+
+  -- ------------------------- 2a) falla una guarda en el paso de las reglas
+  -- El incremento 10 esta por debajo del minimo que acabamos de fijar (50),
+  -- asi que lo rebota trg_minimo_incremento_regla -- DESPUES de haber escrito
+  -- carrera, remate y los dos caballos.
+  perform _p.limpiar();
+  delete from realtime.messages;
+  v_admin := _p.usuario('jefa', 0, true);
+  perform _p.actuar_como(v_admin);
+
+  begin
+    perform public.crear_remate_completo(
+      v_carrera, v_remate_j,
+      jsonb_build_array(
+        jsonb_build_object('numero', 1, 'nombre', 'Relampago', 'jinete', 'J. Perez',
+          'precio_salida', 100),
+        jsonb_build_object('numero', 2, 'nombre', 'Trueno', 'jinete', 'M. Lopez',
+          'precio_salida', 150,
+          'reglas', jsonb_build_array(
+            jsonb_build_object('min_precio', 150, 'max_precio', null, 'incremento', 10)))
+      )
+    );
+    v_msg_a := 'NO REBOTO';
+  exception when others then
+    v_sql_a := sqlstate; v_msg_a := sqlerrm;
+  end;
+
+  select (select count(*) from public.races)
+       + (select count(*) from public.remates)
+       + (select count(*) from public.horses)
+       + (select count(*) from public.remate_price_rules)
+    into v_basura_a;
+  select count(*) into v_senal_a from realtime.messages where topic = 'remates:lista';
+
+  v_falla_guarda_ok := v_sql_a = 'P0001' and v_basura_a = 0 and v_senal_a = 0;
+
+  -- --------------------- 2b) falla un NOT NULL en el paso de las reglas
+  -- Esta no depende de ningun ajuste: `remate_price_rules.min_precio` es NOT
+  -- NULL, asi que una regla sin minimo rebota con 23502 siempre, en cualquier
+  -- instalacion. Es el mismo punto del recorrido, por otra puerta.
+  perform _p.limpiar();
+  v_admin := _p.usuario('jefa', 0, true);
+  perform _p.actuar_como(v_admin);
+
+  begin
+    perform public.crear_remate_completo(
+      v_carrera, v_remate_j,
+      jsonb_build_array(
+        jsonb_build_object('numero', 1, 'nombre', 'Relampago', 'jinete', 'J. Perez',
+          'precio_salida', 100,
+          'reglas', jsonb_build_array(
+            jsonb_build_object('min_precio', null, 'max_precio', null, 'incremento', 50)))
+      )
+    );
+    v_msg_b := 'NO REBOTO';
+  exception when others then
+    v_sql_b := sqlstate; v_msg_b := sqlerrm;
+  end;
+
+  select (select count(*) from public.races)
+       + (select count(*) from public.remates)
+       + (select count(*) from public.horses)
+       + (select count(*) from public.remate_price_rules)
+    into v_basura_b;
+
+  v_falla_notnull_ok := v_sql_b = '23502' and v_basura_b = 0;
+
+  -- ------------------------------------------- 3) numeros repetidos
+  perform _p.limpiar();
+  v_admin := _p.usuario('jefa', 0, true);
+  perform _p.actuar_como(v_admin);
+
+  begin
+    perform public.crear_remate_completo(
+      v_carrera, v_remate_j,
+      jsonb_build_array(
+        jsonb_build_object('numero', 5, 'nombre', 'Uno', 'jinete', 'A', 'precio_salida', 100),
+        jsonb_build_object('numero', 5, 'nombre', 'Dos', 'jinete', 'B', 'precio_salida', 100)
+      )
+    );
+    v_msg_c := 'NO REBOTO';
+  exception when others then
+    v_sql_c := sqlstate; v_msg_c := sqlerrm;
+  end;
+
+  select (select count(*) from public.races) + (select count(*) from public.remates)
+       + (select count(*) from public.horses)
+    into v_basura_c;
+
+  -- P0001 y no 23505: la traduccion funciona. Quien rechaza sigue siendo
+  -- horses_race_id_numero_key, que viene en el baseline; lo que cambia es que
+  -- el admin lee una frase en vez de "duplicate key value violates...".
+  v_repetido_ok := v_sql_c = 'P0001' and v_msg_c like '%repetido%' and v_basura_c = 0;
+
+  -- --------------------------------------------- 4) ningun caballo
+  perform _p.limpiar();
+  v_admin := _p.usuario('jefa', 0, true);
+  perform _p.actuar_como(v_admin);
+
+  begin
+    perform public.crear_remate_completo(v_carrera, v_remate_j, '[]'::jsonb);
+  exception when others then
+    v_sql_d := sqlstate;
+  end;
+  select count(*) into v_basura_d from public.races;
+  v_sin_caballos_ok := v_sql_d = 'P0001' and v_basura_d = 0;
+
+  -- ------------------------------------------- 5) un jugador no puede
+  perform _p.actuar_como(v_juan);
+  begin
+    perform public.crear_remate_completo(
+      v_carrera, v_remate_j,
+      jsonb_build_array(jsonb_build_object('numero', 1, 'nombre', 'X', 'jinete', 'Y', 'precio_salida', 100)));
+  exception when others then
+    v_sql_e := sqlstate;
+  end;
+  select count(*) into v_basura_e from public.races;
+  v_jugador_ok := v_sql_e = 'P0001' and v_basura_e = 0;
+
+  -- Se devuelve el ajuste como estaba, para no alterar a quien venga despues.
+  update public.ajustes_instalacion set valor = v_min_previo where clave = 'minimo_incremento';
+
+  perform _p.anotar(67, 'Crear un remate es atomico',
+    'el camino bueno escribe las cuatro tablas, cuelga cada escalera de su caballo y emite una senal; una guarda, un NOT NULL, un numero repetido, cero caballos o un jugador rechazan sin dejar nada',
+    v_bueno_ok and v_en_bitacora and v_falla_guarda_ok and v_falla_notnull_ok
+      and v_repetido_ok and v_sin_caballos_ok and v_jugador_ok,
+    format('bueno=%s (caballos=%s reglas=%s senal=%s) bitacora=%s | guarda_en_reglas=%s (%s basura=%s senal=%s) | notnull_en_reglas=%s (%s basura=%s) | repetido=%s (%s basura=%s) | sin_caballos=%s (%s) | jugador=%s (%s) | la frase del repetido: %s',
+      v_bueno_ok, v_cab, v_reg, v_senal_buena, v_en_bitacora,
+      v_falla_guarda_ok, coalesce(v_sql_a,'sin excepcion'), v_basura_a, v_senal_a,
+      v_falla_notnull_ok, coalesce(v_sql_b,'sin excepcion'), v_basura_b,
+      v_repetido_ok, coalesce(v_sql_c,'sin excepcion'), v_basura_c,
+      v_sin_caballos_ok, coalesce(v_sql_d,'sin excepcion'),
+      v_jugador_ok, coalesce(v_sql_e,'sin excepcion'),
+      coalesce(v_msg_c,'-')));
+end $$;
+
+
+-- ============================================================================
+--  P68 - Las escaleras se reemplazan de una vez o no se reemplazan
+--
+--  EL DEFECTO QUE EXISTE PARA IMPEDIR. La pantalla de editar hacia un `delete`
+--  de todas las escaleras del remate y un `insert` de las nuevas, en dos
+--  llamadas sueltas. Entre las dos el remate se quedaba SIN NINGUNA escalera,
+--  en vivo, y todos los caballos pasaban a subir con remates.incremento_minimo.
+--  Y el admin leia "Error guardando cambios" y deducia que no se habia tocado
+--  nada, cuando el borrado ya estaba hecho.
+--
+--  LO QUE MIDE
+--   1. el reemplazo normal deja EXACTAMENTE las escaleras nuevas, ni una del
+--      juego viejo
+--   2. si una escalera nueva no pasa una guarda, las VIEJAS SIGUEN AHI: es la
+--      prueba de que el borrado se deshizo. Si fallara, aqui saldria 0.
+--   3. una lista vacia es una orden legitima: el remate se queda sin escaleras
+--   4. una escalera que apunta a un caballo de OTRA carrera se rechaza, y las
+--      viejas siguen ahi
+--   5. un jugador no puede llamarla
+--   6. `authenticated` ya NO puede escribir remate_price_rules directo: esta
+--      funcion es la unica puerta
+--
+--  REGLA DEL 28/09: se comprueba CUAL excepcion. P0001 es nuestro codigo
+--  rechazando a proposito; 42883 seria que la migracion no esta aplicada.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid; v_juan uuid;
+  v_existe boolean;
+  v_rem uuid; v_race uuid;
+  v_c1 uuid; v_c2 uuid;
+  v_otra_race uuid; v_ajeno uuid;
+  v_escritas int;
+
+  v_sql_b text; v_quedan_b int;
+  v_sql_d text; v_quedan_d int;
+  v_sql_e text; v_quedan_e int;
+
+  v_reemplazo_ok boolean := false;
+  v_rollback_ok boolean := false;
+  v_vaciar_ok boolean := false;
+  v_ajeno_ok boolean := false;
+  v_jugador_ok boolean := false;
+  v_puerta_ok boolean := false;
+  v_en_bitacora boolean := false;
+begin
+  perform _p.limpiar();
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'guardar_escaleras'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(68, 'Las escaleras se reemplazan de una vez',
+      'guardar_escaleras() existe y un rechazo deja las escaleras viejas intactas',
+      false, 'guardar_escaleras NO EXISTE: la migracion 20261007150000 no esta aplicada');
+    return;
+  end if;
+
+  update public.ajustes_instalacion set valor = '50' where clave = 'minimo_incremento';
+
+  v_admin := _p.usuario('jefa', 0, true);
+  v_juan  := _p.usuario('juan', 1000, false);
+  perform _p.actuar_como(v_admin);
+
+  -- Un remate con dos caballos y una escalera vieja en el caballo 1.
+  select c.id_carrera, c.id_remate into v_race, v_rem
+  from public.crear_remate_completo(
+    jsonb_build_object('nombre','C1','fecha',current_date::text),
+    jsonb_build_object('nombre','R1','incremento_minimo',50,'porcentaje_casa',25),
+    jsonb_build_array(
+      jsonb_build_object('numero',1,'nombre','Uno','precio_salida',100,
+        'reglas', jsonb_build_array(
+          jsonb_build_object('min_precio',100,'max_precio',500,'incremento',50))),
+      jsonb_build_object('numero',2,'nombre','Dos','precio_salida',100)
+    )) c;
+
+  select h.id into v_c1 from public.horses h where h.race_id = v_race and h.numero = 1;
+  select h.id into v_c2 from public.horses h where h.race_id = v_race and h.numero = 2;
+
+  -- Un caballo de otra carrera, para la fase 4.
+  insert into public.races (nombre, fecha) values ('otra', current_date) returning id into v_otra_race;
+  insert into public.horses (race_id, numero, nombre, precio_salida)
+    values (v_otra_race, 7, 'Ajeno', 100) returning id into v_ajeno;
+
+  -- ----------------------------------------- 1) reemplazo normal
+  -- Se cambia de "una escalera en el caballo 1" a "dos tramos en el caballo 2".
+  v_escritas := public.guardar_escaleras(v_rem, jsonb_build_array(
+    jsonb_build_object('horse_id', v_c2, 'min_precio', 100, 'max_precio', 600, 'incremento', 50),
+    jsonb_build_object('horse_id', v_c2, 'min_precio', 600, 'max_precio', null, 'incremento', 100)
+  ));
+
+  v_reemplazo_ok :=
+        v_escritas = 2
+    and (select count(*) from public.remate_price_rules r where r.remate_id = v_rem) = 2
+    -- ni una del juego viejo: el caballo 1 se queda sin escalera
+    and (select count(*) from public.remate_price_rules r where r.remate_id = v_rem and r.horse_id = v_c1) = 0
+    and (select count(*) from public.remate_price_rules r where r.remate_id = v_rem and r.horse_id = v_c2) = 2;
+
+  select exists (
+    select 1 from public.admin_actions a
+    where a.action = 'guardar_escaleras' and a.target_id = v_rem::text
+  ) into v_en_bitacora;
+
+  -- ------------------- 2) una guarda rechaza: las VIEJAS siguen ahi
+  -- Incremento 10 por debajo del minimo (50) -> trg_minimo_incremento_regla.
+  -- Si el borrado no se deshiciera, aqui quedarian 0 escaleras.
+  begin
+    perform public.guardar_escaleras(v_rem, jsonb_build_array(
+      jsonb_build_object('horse_id', v_c1, 'min_precio', 100, 'max_precio', null, 'incremento', 10)
+    ));
+  exception when others then
+    v_sql_b := sqlstate;
+  end;
+
+  select count(*) into v_quedan_b from public.remate_price_rules r where r.remate_id = v_rem;
+
+  -- Siguen siendo las DOS del caballo 2, no las del intento fallido.
+  v_rollback_ok := v_sql_b = 'P0001' and v_quedan_b = 2
+    and (select count(*) from public.remate_price_rules r
+          where r.remate_id = v_rem and r.horse_id = v_c2) = 2;
+
+  -- ------------------------------- 4) caballo de otra carrera
+  begin
+    perform public.guardar_escaleras(v_rem, jsonb_build_array(
+      jsonb_build_object('horse_id', v_ajeno, 'min_precio', 100, 'max_precio', null, 'incremento', 50)
+    ));
+  exception when others then
+    v_sql_d := sqlstate;
+  end;
+  select count(*) into v_quedan_d from public.remate_price_rules r where r.remate_id = v_rem;
+  v_ajeno_ok := v_sql_d = 'P0001' and v_quedan_d = 2;
+
+  -- ------------------------------------- 5) un jugador no puede
+  perform _p.actuar_como(v_juan);
+  begin
+    perform public.guardar_escaleras(v_rem, '[]'::jsonb);
+  exception when others then
+    v_sql_e := sqlstate;
+  end;
+  select count(*) into v_quedan_e from public.remate_price_rules r where r.remate_id = v_rem;
+  v_jugador_ok := v_sql_e = 'P0001' and v_quedan_e = 2;
+
+  -- ----------------------------------- 3) vaciar es una orden valida
+  perform _p.actuar_como(v_admin);
+  v_escritas := public.guardar_escaleras(v_rem, '[]'::jsonb);
+  v_vaciar_ok := v_escritas = 0
+    and (select count(*) from public.remate_price_rules r where r.remate_id = v_rem) = 0;
+
+  -- --------------------- 6) la tabla ya no se escribe directo
+  v_puerta_ok :=
+        not has_table_privilege('authenticated', 'public.remate_price_rules', 'insert')
+    and not has_table_privilege('authenticated', 'public.remate_price_rules', 'update')
+    and not has_table_privilege('authenticated', 'public.remate_price_rules', 'delete')
+    and not has_table_privilege('authenticated', 'public.remate_price_rules', 'truncate')
+    -- leer si: la pantalla de editar las pinta
+    and has_table_privilege('authenticated', 'public.remate_price_rules', 'select');
+
+  perform _p.anotar(68, 'Las escaleras se reemplazan de una vez',
+    'el reemplazo deja solo las nuevas; si una se rechaza las viejas siguen ahi; vaciar es valido; un caballo de otra carrera y un jugador se rechazan; y la tabla ya no se escribe directo',
+    v_reemplazo_ok and v_en_bitacora and v_rollback_ok and v_vaciar_ok
+      and v_ajeno_ok and v_jugador_ok and v_puerta_ok,
+    format('reemplazo=%s bitacora=%s | rechazo_deja_las_viejas=%s (%s quedan=%s, esperado 2) | vaciar=%s | caballo_ajeno=%s (%s quedan=%s) | jugador=%s (%s) | tabla_cerrada=%s',
+      v_reemplazo_ok, v_en_bitacora,
+      v_rollback_ok, coalesce(v_sql_b,'sin excepcion'), v_quedan_b,
+      v_vaciar_ok,
+      v_ajeno_ok, coalesce(v_sql_d,'sin excepcion'), v_quedan_d,
+      v_jugador_ok, coalesce(v_sql_e,'sin excepcion'),
+      v_puerta_ok));
 end $$;
 
 
