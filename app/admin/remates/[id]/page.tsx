@@ -755,157 +755,103 @@ export default function AdminRemateDetailPage() {
       const adminId = await ensureAdmin()
       if (!adminId) return
 
+      // UNA SOLA LLAMADA, UNA SOLA TRANSACCION. (08/10/2026)
+      //
+      // Aqui habia 16 o 17 escrituras sueltas para una carrera de 12 caballos:
+      // `races`, `editar_remate`, el borrado de caballos, UN UPDATE O INSERT
+      // POR CABALLO, y las escaleras. Un fallo a mitad del bucle dejaba unos
+      // caballos con los datos nuevos y otros con los viejos, y este `catch`
+      // decia "Error guardando cambios" como si no hubiera pasado nada.
+      //
+      // Y los cambios de un caballo -- nombre, jinete, precio de salida,
+      // retirado, altas y bajas -- no dejaban NINGUN rastro en admin_actions,
+      // porque eran UPDATE directos. Cambiar el precio de salida de un caballo
+      // era invisible, y eso roza el dinero: es lo que se lleva la casa si
+      // nadie puja por el.
+      //
+      // Ahora lo hace guardar_remate_completo(), que ademas DELEGA en
+      // editar_remate() y guardar_escaleras() en vez de reimplementarlas: las
+      // tres comparten transaccion y cada una deja su propio asiento, solo si
+      // hubo cambio. Ver 20261008150000 y P70.
+      //
+      // Desde esa migracion `authenticated` ya no puede escribir `races` ni
+      // `horses` directo. Si alguien vuelve a poner aqui un .update(), dejara
+      // de funcionar en vez de funcionar a medias.
       const raceFechaISO = parseDateParts(raceDraft.fecha_dd, raceDraft.fecha_mm, raceDraft.fecha_aa)
       const raceHora24 = parseTime12hTo24(raceDraft.hora_programada)
       const numeroCarreraText = raceDraft.numero_carrera_text.trim()
       const numeroCarreraNum =
         numeroCarreraText && Number.isFinite(Number(numeroCarreraText)) ? Number(numeroCarreraText) : null
 
-      const raceUpdate: any = {
-        nombre: raceDraft.descripcion.trim(),
-        fecha: raceFechaISO,
-        estado: raceDraft.estado.trim() || race.estado,
-        dia: raceDraft.dia.trim(),
-        distancia_m: n(raceDraft.distancia_m),
-        numero_carrera_text: numeroCarreraText || null,
-      }
-      raceUpdate.hipodromo = raceDraft.hipodromo.trim() ? raceDraft.hipodromo.trim() : null
-      raceUpdate.numero_carrera = numeroCarreraNum
-      raceUpdate.hora_programada = raceHora24 ? raceHora24 : null
-
-      const { error: raceErr } = await supabase.from("races").update(raceUpdate).eq("id", race.id)
-      if (raceErr) throw new Error(raceErr.message)
-
       const opensDateISO = parseDateParts(remateDraft.opens_dd, remateDraft.opens_mm, remateDraft.opens_aa)
       const closesDateISO = parseDateParts(remateDraft.closes_dd, remateDraft.closes_mm, remateDraft.closes_aa)
       const opensTime24 = parseTime12hTo24(remateDraft.opens_time)
       const closesTime24 = parseTime12hTo24(remateDraft.closes_time)
+      const opensAt = buildCaracasTs(opensDateISO, opensTime24)
+      const closesAt = buildCaracasTs(closesDateISO, closesTime24)
 
-      // ANTES: un UPDATE directo sobre `remates`, con `estado` incluido.
+      // Las escaleras viajan COLGANDO de su caballo, no en una lista aparte:
+      // asi un caballo que se acaba de crear lleva la suya sin que esta
+      // pantalla tenga que recuperar su id primero. El `newIdByTemp` que hacia
+      // eso desaparece.
       //
-      // Ese campo era el agujero entero de la tarea 3.2: poner estado a
-      // 'cerrado' a mano NO le cobra a nadie, y liquidar_remate() solo exige
-      // que el estado sea 'cerrado'. Se pagaba un premio con dinero que nadie
-      // habia aportado.
-      //
-      // AHORA: la RPC editar_remate(), que no recibe el estado siquiera. El
-      // estado se cambia con cerrar / cancelar / archivar, que son las que
-      // mueven el dinero. Y la base ya no acepta el UPDATE directo: se revoco
-      // en la migracion 20260928100000.
-      const { error: remErr } = await supabase.rpc("editar_remate", {
-        p_remate_id: remate.id,
-        p_porcentaje_casa: n(remateDraft.porcentaje_casa),
-        p_incremento_minimo: n(remateDraft.incremento_minimo),
-        p_tipo: remateDraft.tipo || remate.tipo || "vivo",
-        // Tres caminos, y el tercero es nuevo (migracion 20261002100000).
-        // `p_opens_at: null` significaba "no lo cambies", asi que borrar la
-        // hora aqui no la borraba en la base y no salia ningun error: la
-        // pantalla decia una cosa y la base guardaba otra. Para quitarla hay
-        // que pedirlo con la bandera.
-        p_opens_at: buildCaracasTs(opensDateISO, opensTime24),
-        p_closes_at: buildCaracasTs(closesDateISO, closesTime24),
-        p_limpiar_opens_at: !buildCaracasTs(opensDateISO, opensTime24),
-        p_limpiar_closes_at: !buildCaracasTs(closesDateISO, closesTime24),
-      })
-      if (remErr) throw new Error(remErr.message)
+      // La clave de `horseRulesByKey` es el id del caballo si ya existe, y su
+      // tempId si es nuevo.
+      const caballosPayload = horses.map((h) => {
+        const clave = h.id ?? h.tempId
+        const reglas = horseRulesEnabled[clave]
+          ? (horseRulesByKey[clave] || [])
+              .filter((r) => r.min_precio.trim() && r.incremento.trim())
+              .map((r) => ({
+                min_precio: n(r.min_precio),
+                max_precio: r.max_precio.trim() ? n(r.max_precio) : null,
+                incremento: n(r.incremento),
+              }))
+          : []
 
-      if (deletedHorseIds.length > 0) {
-        const { error: delErr } = await supabase.from("horses").delete().in("id", deletedHorseIds)
-        if (delErr) throw new Error(delErr.message)
-      }
-
-      const newIdByTemp: Record<string, string> = {}
-      for (const h of horses) {
-        if (h.id) {
-          const { error: hErr } = await supabase
-            .from("horses")
-            .update({
-              numero: Number(h.numero),
-              nombre: h.nombre.trim(),
-              jinete: h.jinete.trim(),
-              comentarios: h.comentarios.trim() ? h.comentarios.trim() : null,
-              precio_salida: n(h.precio_salida),
-              retirado: !!h.retirado,
-            })
-            .eq("id", h.id)
-          if (hErr) throw new Error(hErr.message)
-        } else {
-          const { data: hData, error: hErr } = await supabase
-            .from("horses")
-            .insert({
-              race_id: remate.race_id,
-              numero: Number(h.numero),
-              nombre: h.nombre.trim(),
-              jinete: h.jinete.trim(),
-              comentarios: h.comentarios.trim() ? h.comentarios.trim() : null,
-              precio_salida: n(h.precio_salida),
-              retirado: !!h.retirado,
-            })
-            .select("id")
-            .single()
-          if (hErr) throw new Error(hErr.message)
-          newIdByTemp[h.tempId] = hData.id as string
+        return {
+          id: h.id ?? null,
+          numero: Number(h.numero),
+          nombre: h.nombre.trim(),
+          jinete: h.jinete.trim() ? h.jinete.trim() : null,
+          comentarios: h.comentarios.trim() ? h.comentarios.trim() : null,
+          precio_salida: n(h.precio_salida),
+          retirado: !!h.retirado,
+          reglas,
         }
-      }
-
-      const rulesPayload: any[] = []
-
-      // Aqui ya NO se expande ninguna escalera general. Un caballo sin reglas
-      // propias no recibe ninguna fila, y por eso la base le aplica
-      // `remates.incremento_minimo`. Esa es toda la regla general.
-      //
-      // Los caballos borrados en esta misma edicion ya salieron de `horses`
-      // (removeHorse) y se fueron en `deletedHorseIds` arriba, asi que no
-      // reciben reglas. Los que se acaban de crear ya tienen su id en
-      // newIdByTemp.
-
-      for (const [horseKey, list] of Object.entries(horseRulesByKey)) {
-        if (!horseRulesEnabled[horseKey]) continue
-        if (!list || list.length === 0) continue
-
-        const resolvedHorseId = newIdByTemp[horseKey] || horseKey
-        for (const r of list) {
-          rulesPayload.push({
-            remate_id: remate.id,
-            horse_id: resolvedHorseId,
-            min_precio: n(r.min_precio),
-            max_precio: r.max_precio.trim() ? n(r.max_precio) : null,
-            incremento: n(r.incremento),
-          })
-        }
-      }
-
-      // UNA SOLA LLAMADA, Y UNA SOLA TRANSACCION. (07/10/2026)
-      //
-      // Aqui habia un `delete` de TODAS las escaleras del remate y un `insert`
-      // de las nuevas, en dos llamadas sueltas. Entre las dos el remate se
-      // quedaba sin ninguna escalera, EN VIVO, y desde ese instante todos los
-      // caballos subian con `remates.incremento_minimo` en vez de la escalera
-      // configurada.
-      //
-      // Y lo peor no era la perdida: era que el `catch` de abajo ensenaba
-      // "Error guardando cambios" y el admin deducia que no se habia tocado
-      // nada, cuando el borrado ya estaba hecho.
-      //
-      // Ahora lo hace guardar_escaleras(), que es una transaccion: si una
-      // escalera nueva no pasa una guarda, las VIEJAS siguen ahi. Lo mide P68.
-      // Ver 20261007150000_guardar_escaleras.sql.
-      //
-      // Y desde esa misma migracion `authenticated` ya no tiene insert, update
-      // ni delete sobre `remate_price_rules`: esta RPC es la unica puerta. Si
-      // alguien vuelve a poner aqui un .insert() directo, dejara de funcionar
-      // en vez de funcionar a medias.
-      const { error: escErr } = await supabase.rpc("guardar_escaleras", {
-        p_remate_id: remate.id,
-        // `remate_id` no viaja: lo pone la RPC desde su propio parametro.
-        p_reglas: rulesPayload.map((r) => ({
-          horse_id: r.horse_id,
-          min_precio: r.min_precio,
-          max_precio: r.max_precio,
-          incremento: r.incremento,
-        })),
       })
-      if (escErr) throw new Error(escErr.message)
+
+      const { error: guardarErr } = await supabase.rpc("guardar_remate_completo", {
+        p_remate_id: remate.id,
+        p_carrera: {
+          nombre: raceDraft.descripcion.trim(),
+          hipodromo: raceDraft.hipodromo.trim() ? raceDraft.hipodromo.trim() : null,
+          numero_carrera: numeroCarreraNum,
+          numero_carrera_text: numeroCarreraText || null,
+          fecha: raceFechaISO,
+          hora_programada: raceHora24 ? raceHora24 : null,
+          dia: raceDraft.dia.trim() ? raceDraft.dia.trim() : null,
+          distancia_m: n(raceDraft.distancia_m),
+          estado: raceDraft.estado.trim() || race.estado,
+        },
+        p_remate: {
+          porcentaje_casa: n(remateDraft.porcentaje_casa),
+          incremento_minimo: n(remateDraft.incremento_minimo),
+          tipo: remateDraft.tipo || remate.tipo || "vivo",
+          // Tres caminos, y el tercero importa (migracion 20261002100000):
+          // `null` significa "no lo cambies", asi que para BORRAR una hora hay
+          // que pedirlo con la bandera. Sin ella, quitarla en la pantalla no
+          // la quitaba en la base y no salia ningun error.
+          opens_at: opensAt,
+          closes_at: closesAt,
+          limpiar_opens_at: !opensAt,
+          limpiar_closes_at: !closesAt,
+        },
+        p_caballos: caballosPayload,
+        p_eliminados: deletedHorseIds,
+      })
+
+      if (guardarErr) throw new Error(guardarErr.message)
 
       setOk("Cambios guardados.")
       await loadAll(true)
