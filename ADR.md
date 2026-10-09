@@ -935,3 +935,51 @@ Es el ADR-022 —la alarma que saltaba cuando no pasaba nada— y el ADR-034 —
 **`editar_remate` se regeneró entera**, extraída de `20261002100000` con un script y parcheada en un solo sitio. No se retipea un cuerpo PL/pgSQL a mano: el 02/10 hacerlo perdió un `pg_advisory_xact_lock` e inventó un estado que no existe (ADR-021).
 
 **Consecuencias.** `P69`, siete condiciones, incluida la que da nombre al ADR: guardar las mismas escaleras no deja asiento **y no toca las filas**.
+
+---
+
+## ADR-039 · Editar un remate es una transacción, y cada cambio deja asiento
+
+**Fecha.** 8 de octubre de 2026 *(migración `20261008150000`)*
+
+**Contexto.** Jota, el 07/10 mirando `/admin/log`: *«ahí debería decir que editaron el incremento de tanto a tanto y así con cada acción que se edite, el cambio de nombre de un caballo y cualquier otra cosa que se pueda editar en un remate ya creado»*.
+
+No se podía. Los cambios de un caballo —nombre, jinete, precio de salida, retirado, altas y bajas— eran `UPDATE` directos desde el navegador: **no había trigger ni línea que escribiera `admin_actions` por `horses`**. Cambiar el precio de salida de un caballo era invisible, y eso roza el dinero, porque es lo que se lleva la casa si nadie puja por él.
+
+Y el guardado seguía siendo **16 o 17 escrituras sueltas** para una carrera de 12 caballos: `races`, `editar_remate`, el borrado de caballos, **un UPDATE o INSERT por caballo**, y las escaleras. Un fallo a mitad del bucle dejaba unos caballos con los datos nuevos y otros con los viejos, y la pantalla diciendo «Error guardando cambios» como si no hubiera pasado nada.
+
+**Decisión: `guardar_remate_completo(uuid, jsonb, jsonb, jsonb, jsonb)`, que DELEGA en vez de reimplementar.** `editar_remate` y `guardar_escaleras` ya existían, ya estaban probadas y ya dejaban asiento solo cuando había cambio (ADR-038). Esta función **las llama**. Una función PL/pgSQL que llama a otra sigue en la misma transacción, así que el todo es atómico igual y no aparece una segunda implementación de la regla del incremento ni de la de las escaleras. Copiarlas habría sido el ADR-015 dentro de la propia base.
+
+Lo que hace por su cuenta es lo que nadie hacía: `races` y `horses`, con su auditoría campo a campo.
+
+**El candado se toma tres veces y no pasa nada.** `pg_advisory_xact_lock` cuenta re-entradas dentro de la misma transacción, así que tomarlo aquí y otra vez dentro de las dos funciones delegadas no se traba.
+
+**Las bajas se piden, no se deducen.** Sería más cómodo borrar todo caballo que no venga en la lista, y sería una bomba: un fallo del frontend que mandara la lista a medias borraría caballos con pujas. Se borra exactamente lo que venga en `p_eliminados`, y solo si es de esa carrera. **No adivinar lo que el usuario no dijo** vale también entre dos trozos de código propio.
+
+**Las escaleras viajan colgando de su caballo**, igual que en el ADR-036, así que un caballo recién creado lleva la suya sin que la pantalla tenga que recuperar su id. El `newIdByTemp` que hacía ese trabajo desaparece.
+
+**Qué dice el asiento.** Una clave por cosa que cambió, con la forma `{antes, despues}` que `/admin/log` ya sabe pintar:
+
+```
+Carrera hipodromo: La Rinconada → Valencia
+Caballo 1 precio salida: 100,00 → 150,00
+Caballo 7 alta: (no existía) → Centella, salida 120,00
+Caballo 3 baja: Tres → (eliminado)
+```
+
+Y **no nombra al caballo que no cambió**. Si no cambió nada, no hay asiento (ADR-038).
+
+**Y se cierran las dos puertas que quedaban.** `races` y `horses` bajan a solo lectura para `authenticated`. Con `remate_price_rules` (ADR-037), quedan cerradas las tres tablas del catálogo del remate: el panel ya no escribe ninguna directo.
+
+**Una corrección de P48.** `support_settings` llevaba desde el 29/09 agrupada con esas tres, con la nota de que las cuatro bajarían «el día que existan `crear_remate_completo()` y `guardar_remate_completo()`». No tenía nada que ver: la escribe `/admin/super/soporte`, otra pantalla, y necesita su propia RPC. Sale de ese grupo con su motivo escrito al lado.
+
+**Lo que NO arregla, dicho para que no se descubra por sorpresa.** Siguen sin poder intercambiarse los números de dos caballos: `horses_race_id_numero_key` no es diferible, así que pasar el 3 a 5 cuando ya hay un 5 rebota con 23505. La diferencia es que ahora **rebota sin dejar nada a medias**. Arreglarlo de verdad es renumerar en dos fases o declarar la restricción diferible, y es una decisión aparte.
+
+**Consecuencias.** `P70`, ocho condiciones. La que da la medida es la atomicidad: se fuerza que el tercer caballo no pase el mínimo de precio de salida **después** de haber escrito los dos primeros y la carrera, y se compara la foto de los caballos antes y después:
+
+```
+foto antes:   1=Relampago/150.00, 2=Dos/100.00, 7=Centella/120.00
+foto después: 1=Relampago/150.00, 2=Dos/100.00, 7=Centella/120.00
+```
+
+Idéntica. Antes, el 1 y el 2 se habrían quedado cambiados.

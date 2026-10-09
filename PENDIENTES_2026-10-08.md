@@ -1,15 +1,15 @@
-# Pendientes — al 7 de octubre de 2026
+# Pendientes — al 8 de octubre de 2026
 
-Sustituye a `PENDIENTES_2026-10-05.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (38 decisiones) y en el arnés.
+Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
+detalla aquí: está en `ADR.md` (39 decisiones) y en el arnés.
 
-**Estado del proyecto:** 69/69 en `tests/pruebas_dinero.sql`, 4/4 en
+**Estado del proyecto:** 70/70 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 41 migraciones, 38 ADRs.
+31 en `tests/aviso_puja.mjs`. 42 migraciones, 39 ADRs.
 
 ---
 
-## Cerrado el 7 de octubre
+## Cerrado el 7 y el 8 de octubre
 
 | Qué | Dónde |
 |---|---|
@@ -21,41 +21,39 @@ detalla aquí: está en `ADR.md` (38 decisiones) y en el arnés.
 | **La bitácora deja de anunciar lo que no pasó**, y dice qué cambió por caballo | ADR-038, `20261007170000`, P69 |
 | `db push --dry-run` y `migration list` entran en el ciclo | `COMO_APLICAR.md` |
 | Claude ejecuta los comandos locales; Jota conserva el push a la base y todo git | `CLAUDE.md` §1 |
+| **`guardar_remate_completo`**: editar un remate es una transacción, y los cambios de un caballo dejan asiento | ADR-039, `20261008150000`, P70 |
+| `races` y `horses` bajan a **solo lectura**: cerradas las tres tablas del catálogo | ADR-039, P48 |
 
 ---
 
 ## 1 · Lo que yo haría primero
 
-### 1.1 · `guardar_remate_completo` — lo que queda de la pantalla de editar
-El guardado de un remate siguen siendo **16 o 17 escrituras sueltas** para una carrera
-de 12 caballos: `races` (1) + `editar_remate` (1) + borrado de caballos (1) + **un
-UPDATE o INSERT por caballo** (12) + las escaleras (ya atómicas desde el ADR-037).
-
-Dos cosas dependen de esto, y la segunda es la que pidió Jota el 07/10:
-
-- un fallo a mitad del bucle de caballos deja la carrera medio aplicada;
-- **los cambios de un caballo no dejan NINGÚN rastro.** Nombre, jinete, precio de
-  salida, retirado, altas y bajas son `UPDATE` directos: no hay trigger ni línea que
-  escriba `admin_actions` por `horses`. Cambiar el precio de salida de un caballo es
-  invisible, y eso roza el dinero porque es lo que se lleva la casa si nadie puja por él.
-
-El día que exista, `races`, `horses` y `support_settings` bajan a solo lectura y se
-aprietan P36 y P48, como ya se hizo con `remate_price_rules`.
-
-*Aceptación:* forzar un fallo en el caballo 7 de 12 y comprobar que no cambió ninguno;
-y que cambiar el nombre de un caballo deja un asiento que lo dice.
-
-### 1.2 · No se pueden intercambiar los números de dos caballos
+### 1.1 · No se pueden intercambiar los números de dos caballos
 Medido el 07/10: `horses_race_id_numero_key` **no es diferible**, así que cambiar el
 caballo 3 a 5 cuando ya existe un 5 rebota con `23505` en el primer UPDATE. El admin
 recibe un `duplicate key` en crudo. Una transacción sola no lo arregla: hace falta
 hacerlo en dos pasos (a números temporales y luego a los definitivos) o declarar la
 restricción `deferrable initially deferred`.
 
-### 1.3 · Clave de idempotencia al crear un remate
+### 1.2 · Clave de idempotencia al crear un remate
 Un doble clic sigue creando dos remates. La transacción arregló el fallo **a mitad**,
 no el doble clic: dos clics son dos llamadas completas y correctas. Las dos guardas del
 formulario son la única defensa y son del navegador.
+
+### 1.3 · `guardar_soporte` — la última tabla del panel que se escribe directo
+`support_settings` sigue con `insert`, `update` y `delete` para `authenticated`, y
+`/admin/super/soporte` la escribe con un `delete` de los que sobran más un `insert` y
+un `update` por fila: el mismo patrón que ya corregimos dos veces. Es la única tabla
+del panel que queda abierta, y sus datos son los que ve el público en `/contactanos`.
+
+Estuvo agrupada con las tres del catálogo del remate hasta el 08/10 por un error de
+la nota de P48; no tiene nada que ver con `crear_remate_completo` ni con
+`guardar_remate_completo`.
+
+### 1.4 · Cerrar `remates.insert`
+El `GRANT` sigue puesto aunque ya nadie lo use: desde el ADR-036 crear un remate pasa
+por la RPC. P36 lo documenta pero no lo comprueba, a propósito, para no ponerse roja
+por algo que decidimos dejar así. Es una línea de migración y apretar P36.
 
 ---
 

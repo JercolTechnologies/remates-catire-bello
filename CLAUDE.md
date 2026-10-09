@@ -56,9 +56,9 @@ No leas todo. Lee lo que toca:
 | tocar realtime | ADR-024, ADR-025, ADR-026 + `lib/realtime.ts` |
 | tocar contabilidad | ADR-022 + `supabase/migrations/20261005100000_descuadre_inexplicado.sql` |
 | dar de alta un licenciatario | `docs/supabase/INSTALACION_LICENCIATARIO.md` |
-| saber qué falta | `PENDIENTES_2026-10-07.md` (el 10-05 y el 10-01 son históricos) y `BACKLOG_FASE1_FIXES.md` |
+| saber qué falta | `PENDIENTES_2026-10-08.md` (los anteriores son históricos) y `BACKLOG_FASE1_FIXES.md` |
 
-`ADR.md` son 38 decisiones con su contexto, su alternativa descartada y qué las
+`ADR.md` son 39 decisiones con su contexto, su alternativa descartada y qué las
 revertiría. **Casi siempre la pregunta que te estás haciendo ya está contestada ahí.**
 Si tomas una decisión de arquitectura nueva, añade su ADR al final.
 
@@ -83,10 +83,10 @@ lib/
   motivos.ts          motivos de rechazo
   supabaseClient.ts
 supabase/
-  migrations/         41 archivos. El 00000000000000 es el baseline sacado de produccion
+  migrations/         42 archivos. El 00000000000000 es el baseline sacado de produccion
   snippets/           consultas de diagnostico para el SQL Editor del panel
 tests/
-  pruebas_dinero.sql  69 pruebas. UNA conexion. Es el juez.
+  pruebas_dinero.sql  70 pruebas. UNA conexion. Es el juez.
   concurrencia.sql    4 pruebas de carreras. Necesita que el arnes haya corrido antes
   fechas.mjs          30 comprobaciones de SelectorFechaHora  (pnpm test:fechas)
   log.mjs             33 comprobaciones de /admin/log          (pnpm test:log)
@@ -111,7 +111,7 @@ docs/supabase/
    Numérala con la hora de **Caracas** (`TZ=America/Caracas date`), no con la del
    entorno: tu reloj puede ir en UTC y adelantar un día respecto a Jota, que está
    en Colombia. Y escribe la fecha real, en hora de Caracas, en la cabecera.
-2. `pnpm db:reset` + el arnés en local. **Marcador esperado: 69/69 y 4/4.**
+2. `pnpm db:reset` + el arnés en local. **Marcador esperado: 70/70 y 4/4.**
    Esto lo corres **tú** en su máquina; no se lo pidas a Jota.
    **El arnés NUNCA contra producción**: su primera función es `_p.limpiar()`, que
    borra wallets, pujas, perfiles y `admin_actions`. No tiene ninguna guarda que lo
