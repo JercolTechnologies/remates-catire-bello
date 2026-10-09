@@ -3,7 +3,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 
@@ -252,13 +251,10 @@ export default function AdminContabilidadPage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6 pb-24">
-      <div className="mx-auto w-full max-w-md">
+    <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6 pb-24">
+      <div className="mx-auto w-full max-w-7xl">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold">Contabilidad</h1>
-          <Link href="/admin" className="text-xs text-zinc-300 underline underline-offset-4">
-            Volver
-          </Link>
         </div>
 
         {error ? (

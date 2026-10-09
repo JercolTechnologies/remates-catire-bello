@@ -755,16 +755,13 @@ export default function AdminCrearRematePage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
+    <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
       {/* En movil se ve igual que antes; en PC deja de ser una columna
           de 448px con una rejilla de 3 columnas apretada adentro. */}
-      <div className="mx-auto w-full max-w-md md:max-w-3xl">
+      <div className="mx-auto w-full max-w-5xl">
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold">Admin - Crear remate</h1>
-          <Link href="/admin" className="text-xs text-zinc-300 underline underline-offset-4">
-            Volver
-          </Link>
         </div>
 
         {/* Mensajes */}

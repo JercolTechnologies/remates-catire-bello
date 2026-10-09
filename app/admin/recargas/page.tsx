@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useCajaEnVivo } from "@/app/admin/CajaEnVivo"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { useMotivos } from "@/lib/motivos"
@@ -335,7 +334,7 @@ export default function AdminRecargasPage() {
 
   return (
     <main className="min-h-dvh bg-zinc-950 text-zinc-50 px-4 py-6">
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-5xl">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -344,9 +343,6 @@ export default function AdminRecargasPage() {
               Aprueba o rechaza recargas. Aprobar llama <b>aprobar_recarga</b> y acredita la wallet.
             </p>
           </div>
-          <Link href="/admin" className="text-sm text-zinc-300 underline underline-offset-4">
-            Volver
-          </Link>
         </div>
 
         {/* Controls */}

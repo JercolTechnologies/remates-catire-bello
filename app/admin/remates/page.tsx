@@ -428,15 +428,12 @@ export default function AdminRematesPage() {
 
   return (
     <main className="min-h-dvh bg-zinc-950 text-zinc-50">
-      <div className="mx-auto w-full max-w-4xl px-4 py-6">
+      <div className="mx-auto w-full max-w-5xl px-4 py-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold">Gestionar remates</h1>
             <p className="mt-1 text-sm text-zinc-300">Aquí ves caballos, pujadores, monto y el pozo (bruto / 25% / neto).</p>
           </div>
-          <Link href="/admin" className="text-sm text-zinc-300 underline underline-offset-4">
-            Volver
-          </Link>
         </div>
 
         <button

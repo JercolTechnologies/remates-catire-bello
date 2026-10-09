@@ -270,8 +270,8 @@ export default function AdminRetirosPage() {
 
   if (!isAdmin) {
     return (
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
-        <div className="mx-auto w-full max-w-3xl">
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
+        <div className="mx-auto w-full max-w-5xl">
           <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4">
             <p className="text-sm text-zinc-200">No autorizado.</p>
             <Link href="/dashboard" className="mt-2 inline-block text-xs text-zinc-300 underline underline-offset-4">
@@ -286,7 +286,7 @@ export default function AdminRetirosPage() {
   const title = tab === "pendientes" ? "Solicitudes pendientes" : "Ultimas solicitudes"
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-8">
+    <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-8">
       <div className="mx-auto w-full max-w-4xl">
         <div className="flex items-center justify-between">
           <div>
@@ -296,9 +296,6 @@ export default function AdminRetirosPage() {
             </p>
           </div>
 
-          <Link href="/admin" className="text-sm text-zinc-300 underline underline-offset-4">
-            Volver
-          </Link>
         </div>
 
         <div className="mt-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 p-3">

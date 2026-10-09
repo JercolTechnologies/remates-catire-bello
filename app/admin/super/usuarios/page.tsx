@@ -2,7 +2,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 
@@ -96,9 +95,6 @@ export default function SuperUsuariosPage() {
             <h1 className="text-xl font-semibold">Usuarios y wallets</h1>
             <p className="mt-1 text-sm text-zinc-300">Vista exclusiva para superadmin.</p>
           </div>
-          <Link href="/admin" className="text-xs text-zinc-300 underline underline-offset-4">
-            Volver
-          </Link>
         </div>
 
         <div className="mt-4 flex flex-col md:flex-row gap-2">

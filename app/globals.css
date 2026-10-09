@@ -12,6 +12,29 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* ===========================================================================
+   LA PALETA DE LA MARCA
+
+   Estos dorados NO estan elegidos a ojo: se midieron sobre los 532.000
+   pixeles dorados del logo original. El procedimiento y las cifras estan en
+   `docs/MARCA.md`, y `herramientas/marca_sacar.py` los vuelve a sacar si
+   algun dia llega un logo nuevo.
+
+   El fondo de la aplicacion (`zinc-950`, #09090B) ya cae dentro del degradado
+   del logo, asi que no hace falta cambiarlo: la marca y la app comparten
+   fondo desde el primer dia sin que nadie lo planeara.
+
+   Declarados en @theme para que Tailwind genere `text-oro`, `bg-oro`,
+   `border-oro` y compania. Si se escribieran a mano en cada componente
+   volveriamos a tener la marca clavada en veinte sitios, que es justo lo que
+   `lib/marca.ts` viene a evitar.
+   =========================================================================== */
+@theme inline {
+  --color-oro: #d7af5d;
+  --color-oro-brillo: #fdeb9c;
+  --color-oro-sombra: #865d22;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;

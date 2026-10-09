@@ -2,7 +2,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useSenal, topicoRemate, EVENTOS_REMATE } from "@/lib/realtime"
 import { supabase } from "@/lib/supabaseClient"
@@ -1096,9 +1095,6 @@ export default function AdminRemateDetailPage() {
               Edita carrera, remate, caballos y reglas. Cierra o liquida cuando corresponda.
             </p>
           </div>
-          <Link href="/admin/remates" className="text-sm text-zinc-300 underline underline-offset-4">
-            Volver
-          </Link>
         </div>
 
         {/* Lo que falta, a la vista. El boton gris sin explicacion era, en

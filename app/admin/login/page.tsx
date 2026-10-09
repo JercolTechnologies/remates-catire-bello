@@ -57,7 +57,7 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 flex items-center justify-center">
+    <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 flex items-center justify-center">
       <div className="w-full max-w-sm rounded-2xl bg-zinc-900/60 border border-zinc-800 p-5">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold">Admin</h1>
