@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (44 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (45 decisiones) y en el arnés.
 
-**Estado del proyecto:** 72/72 en `tests/pruebas_dinero.sql`, 4/4 en
+**Estado del proyecto:** 73/73 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 44 migraciones, 44 ADRs.
+31 en `tests/aviso_puja.mjs`. 45 migraciones, 45 ADRs.
 
 ---
 
@@ -36,6 +36,8 @@ detalla aquí: está en `ADR.md` (44 decisiones) y en el arnés.
 | **El doble clic ya no crea dos remates**: clave de idempotencia con índice único detrás | ADR-044, `20261010150000`, P72 → **cierra el 1.2** |
 | **`demo_seed.sql`**: monta una demo creíble con la contabilidad cuadrada, probado contra base limpia | `docs/supabase/demo_seed.sql` |
 | **Corregido el instalador**: decía «dos variables» y son **diez**; la comprobación que daba no encontraba las de correo | `INSTALACION_LICENCIATARIO.md` |
+| **`fundar_super_admin`**: el licenciatario funda su propia casa; Jercol deja de entrar a la base del cliente | ADR-045, `20261010193000`, P73 → **cierra el 5.3** |
+| **`AvisoFundar`**: una instalación nueva ya sabe decirle a su dueño cómo empezar | ADR-045 |
 
 ---
 
@@ -157,10 +159,22 @@ nada**: al re-lanzar, PostgreSQL aborta la transacción y se lleva el propio asi
 que fallaron» de `/admin/log` devuelve siempre vacío — tranquilidad falsa. PostgreSQL no
 tiene transacciones autónomas. **Decisión de Jota, diferida.**
 
-### 5.3 · `fundar_super_admin` para quitar el único paso manual del alta
-Dos candados: que solo funcione si no existe ningún super admin, y que el correo
-coincida con uno puesto en `ajustes_instalacion` durante la instalación. Sin el segundo,
-cualquiera que se registre antes que el dueño se queda con la casa.
+### 5.3 · Lo que es «de la casa» y sigue clavado en el código
+Es el bloque que queda antes de poder entregarle una instalación a alguien que cobre
+dinero de verdad. Todo va a `ajustes_instalacion`:
+
+- ⛔ **Datos bancarios de recarga.** Escritos a mano en `app/dashboard/recargar/page.tsx`.
+  **Los jugadores del licenciatario pagarían a la cuenta que esté ahí.** Es el bloqueante.
+- **Nombre de la casa.** `CASA` en `lib/marca.ts` es una constante: para que ponga su
+  nombre hay que editar código y desplegar, lo que rompe «un repo, N clientes».
+- **Quién responde por el dinero.** `/reglas` no lo dice. La marca que ve el jugador es
+  la de la plataforma (decisión del 09/10), así que el jugador que pierda dinero va a
+  reclamarle a la plataforma. Tiene que leer, con nombre y apellido, de quién es la casa.
+- **Correo de avisos.** `SMTP_USER` y `NOTIFY_EMAIL_TO` en Vercel: si quedan los del
+  proveedor, los avisos de recarga del cliente llegan a la bandeja equivocada.
+- **Zona horaria.** `America/Caracas` clavada en `SelectorFechaHora.tsx` y
+  `buildCaracasTs()`. Un licenciatario fuera de Venezuela crearía remates con horas
+  corridas y no se enteraría hasta que un jugador se queje.
 
 ### 5.4 · Resto del bloque
 - **Ganancias por remates discriminadas** (decisión de Jota pendiente, y es de negocio,

@@ -164,38 +164,78 @@ especial: nombre de usuario, correo y contraseña.
 
 ---
 
-## 5. ⭐ Fundar el primer super admin
+## 5. ⭐ Designar al fundador — y que él funde la casa
 
-**Este es el único paso que se hace a mano, y solo ocurre una vez por
-instalación.**
+**Desde el 10/10/2026 tú ya NO creas al primer administrador.** Lo hace él,
+desde la aplicación. Tú solo dejas designado quién puede hacerlo.
 
-En una base recién creada no hay ningún administrador, y `nombrar_admin` exige
-un super admin para funcionar. Huevo y gallina a propósito: si el primer super
-admin se pudiera crear desde la pantalla, **el primero que se registrara se
-quedaría con la casa**. El único portero aceptable para ese nombramiento es
-tener las llaves de la base de datos.
+### Por qué cambió
 
-En el SQL Editor del proyecto del cliente, cambiando los cuatro valores:
+Lo que había antes era un `UPDATE` a mano hecho por **Jercol dentro de la base
+del cliente** — la base que va a tener el dinero de sus jugadores. Eso no es
+solo incómodo de vender: si mañana falta un bolívar, el último que tocó esa
+base fue el proveedor. **Lo mejor que le puede pasar a Jercol es no poder
+entrar ahí.**
 
-```sql
-update public.profiles
-set es_admin      = true,
-    es_super_admin = true,
-    admin_codigo  = 'DUE1',
-    admin_nombre  = 'Nombre del dueño'
-where id = (select id from auth.users where email = 'correo-del-licenciatario');
-```
+### Lo único que haces tú, y antes de entregar
 
-Y **comprobar que afectó a una fila**:
+Pídele su correo —el exacto, el que va a usar para registrarse— y déjalo
+designado en el SQL Editor de **su** proyecto:
 
 ```sql
-select admin_codigo, admin_nombre, es_admin, es_super_admin
-from public.profiles
-where es_super_admin;
+update public.ajustes_instalacion
+set valor = 'pepito@sucorreo.com'      -- ← el correo que te dio el licenciatario
+where clave = 'correo_fundador';       -- ← el nombre de la clave, no se toca
 ```
 
-Si devuelve cero filas, el correo no coincide: el licenciatario no se registró
-todavía, o se registró con otro. No inventes el `id` a mano.
+> **No son dos correos, es uno.** `correo_fundador` es el **nombre de la clave**
+> —se llama así porque su trabajo es decir quién puede fundar— y el **valor** es
+> el correo del licenciatario. La clave nunca cambia de nombre; lo que cambia es
+> su valor.
+
+> **Y se puede corregir.** Mientras nadie haya fundado, puedes volver a correr ese
+> `update` las veces que haga falta: si te equivocaste de correo, lo cambias y ya.
+> Lo que no tiene vuelta atrás es **fundar**.
+
+Comprueba que afectó a **una** fila:
+
+```sql
+select clave, valor from public.ajustes_instalacion where clave = 'correo_fundador';
+```
+
+> **Mayúsculas y minúsculas dan igual**: la comparación las ignora. Lo que no
+> da igual es equivocarse de correo — si no coincide, él no podrá fundar y
+> tendrás que volver a entrar aquí, que es justo lo que esto evita.
+
+Sigues escribiendo una fila en su base, sí. Pero **al instalar, antes de que
+exista un solo bolívar**, no después con el dinero dentro. Es una diferencia de
+naturaleza, no de grado.
+
+### Lo que hace él
+
+Al abrir la aplicación le sale una franja ámbar en todas las pantallas:
+**«Esta casa todavía no tiene dueño»**, con un botón que lleva a
+`/admin/login`. Entra con su correo, y como la casa no tiene dueño la pantalla
+le pide **código y nombre visible** y funda. Cae directo en `/admin`.
+
+La franja se apaga sola y para siempre en cuanto alguien funda.
+
+### Los dos candados, que están en la base y no en la pantalla
+
+1. **Solo si no existe ningún super admin.** Se cierra sola tras el primer uso,
+   y no es una bandera que nadie pueda volver a poner: es el estado de la tabla.
+2. **El correo tiene que coincidir** con `correo_fundador`. Sin esto, el primero
+   que se registrara se quedaría con la casa.
+
+Lo mide `P73`, con siete condiciones. La sexta es la que conviene conocer: tras
+fundar, la prueba **cambia** el correo designado al de otra persona y lo intenta de
+nuevo — y se rechaza igual. **El candado de «ya hay dueño» manda sobre el del
+correo.** Una vez fundada la casa, ese valor deja de tener efecto: a partir de ahí
+los administradores se nombran desde el panel, que es lo correcto.
+
+> **Si él dice que no puede fundar**, mira la clave. El mensaje de error no dice
+> cuál es el correo esperado **a propósito**: si lo dijera, cualquiera con una
+> cuenta podría averiguar el correo del dueño.
 
 A partir de aquí **él se arregla solo** y tú no vuelves a tocar su base: desde
 `/admin/super/admins` nombra a sus cajeros, les pone código y nombre, y les
@@ -262,12 +302,18 @@ Con el licenciatario delante:
 
 ## Lo que queda pendiente de automatizar
 
-El paso 5 es el único manual, y con N clientes son N oportunidades de
-equivocarse. La forma limpia de quitarlo es una función `fundar_super_admin`
-con dos candados: que **solo funcione si no existe ningún super admin todavía**
-—se cierra sola para siempre tras el primer uso— y que exija que el correo
-coincida con uno que tú dejes puesto en `ajustes_instalacion` durante la
-instalación. Sin ese segundo candado, cualquiera que se registre antes que el
-dueño se queda con la casa.
+El paso 5 **ya no es manual** (ADR-045, 10/10/2026). Lo que sigue estando
+clavado en el código y debería salir de `ajustes_instalacion` antes de entregar
+una instalación a alguien que cobre dinero de verdad:
 
-Está apuntado para el bloque de licencias.
+| Qué | Dónde está hoy | Por qué importa |
+|---|---|---|
+| **Datos bancarios de recarga** | `app/dashboard/recargar/page.tsx`, escritos a mano | ⛔ **Los jugadores del licenciatario pagarían a la cuenta que esté ahí.** Es el bloqueante. |
+| **Nombre de la casa** | `CASA` en `lib/marca.ts`, constante | Para que ponga su nombre hay que editar código y desplegar: rompe «un repo, N clientes» |
+| **Quién responde por el dinero** | `/reglas` no lo dice | La marca que ve el jugador es la de la plataforma; tiene que leer con nombre y apellido de quién es la casa |
+| **Correo de avisos** | `SMTP_USER` / `NOTIFY_EMAIL_TO` en Vercel | Si quedan los del proveedor, los avisos de recarga del cliente llegan a la bandeja equivocada |
+| **Zona horaria** | `America/Caracas`, clavada | Un licenciatario fuera de Venezuela crearía remates con horas corridas |
+
+Y, aparte del código: **permisos por área**. Hoy todos los admins pueden todo,
+así que el dueño no puede darle la caja a un cajero sin darle también el poder
+de nombrar y quitar administradores.

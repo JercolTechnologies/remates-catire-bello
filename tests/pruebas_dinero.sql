@@ -2739,8 +2739,10 @@ begin
       ('ajustes_publicos',                'anon'),
       ('buscar_usuario_para_admin',       'auth'),
       ('cancelar_remate',                 'auth'),
+      ('casa_fundada',                    'anon'),
       ('casa_resumen',                    'auth'),
       ('cerrar_remate',                   'auth'),
+      ('fundar_super_admin',              'auth'),
       ('crear_remate_completo',           'auth'),
       ('guardar_escaleras',               'auth'),
       ('guardar_remate_completo',         'auth'),
@@ -6130,6 +6132,177 @@ begin
       v_caballos_ok, v_caballos_de,
       v_asiento_ok, v_asientos,
       v_distintas_ok, v_sin_clave_ok));
+end $$;
+
+
+
+-- ============================================================================
+--  P73 - La casa se funda sola, una vez, y solo quien fue designado
+--
+--  EL DEFECTO QUE EXISTE PARA IMPEDIR. El primer administrador de una
+--  instalacion nueva se creaba con un UPDATE a mano, hecho por JERCOL dentro
+--  de la base del cliente -- la base que va a tener el dinero de sus
+--  jugadores. Lo mejor que le puede pasar al proveedor del software es NO
+--  PODER entrar ahi.
+--
+--  Y el agujero que hay que no abrir al cerrarlo: si fundar se pudiera hacer
+--  desde la pantalla sin mas, el PRIMERO QUE SE REGISTRE se queda con la casa,
+--  con poder para aprobar recargas, pagar retiros y liquidar remates.
+--
+--  LO QUE MIDE
+--   1. una instalacion recien creada dice que NO esta fundada
+--   2. sin `correo_fundador` designado no se puede fundar, y nadie queda admin
+--   3. un correo que no coincide se rechaza
+--   4. un codigo mal formado se rechaza (identidad desde el minuto cero, ADR-027)
+--   5. el correo designado SI funda: queda super admin con codigo y nombre,
+--      `casa_fundada()` pasa a true y queda UN asiento en la bitacora
+--   6. la segunda vez se rechaza AUNQUE el que llame sea el nuevo designado:
+--      el candado de "ya hay dueno" manda sobre el del correo
+--   7. el correo se compara sin distinguir mayusculas: designar
+--      "DUENIO@Casa.Test" y registrarse como "duenio@casa.test" funciona
+--   8. `casa_fundada` la puede leer anon (la pantalla pregunta sin sesion);
+--      `fundar_super_admin` NO
+--
+--  REGLA DEL 28/09: se comprueba CUAL excepcion. Un 42883 significaria que la
+--  migracion no esta aplicada y la prueba no estaria probando nada.
+-- ============================================================================
+do $$
+declare
+  v_existe boolean;
+  v_duenio uuid; v_otro uuid;
+  v_perfil public.profiles%rowtype;
+  v_asientos int;
+
+  v_arranca_ok boolean := false;
+  v_sin_designado_ok boolean := false;
+  v_otro_correo_ok boolean := false;
+  v_codigo_malo_ok boolean := false;
+  v_funda_ok boolean := false;
+  v_segunda_ok boolean := false;
+  v_permisos_ok boolean := false;
+
+  v_sql_a text; v_sql_b text; v_sql_c text; v_sql_d text;
+  v_msg_d text;
+begin
+  perform _p.limpiar();
+  delete from public.admin_actions;
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'fundar_super_admin'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(73, 'La casa se funda sola, una vez, y solo quien fue designado',
+      'fundar_super_admin existe y respeta sus dos candados',
+      false, 'fundar_super_admin NO EXISTE: la migracion 20261010193000 no esta aplicada');
+    return;
+  end if;
+
+  -- La clave arranca vacia en una instalacion nueva. Esta prueba fija SUS
+  -- propias precondiciones y no se fia de como la dejo otra.
+  update public.ajustes_instalacion set valor = '' where clave = 'correo_fundador';
+
+  -- Dos cuentas CON correo. `_p.usuario` no sirve aqui: inserta en auth.users
+  -- sin correo, y el correo es justo el segundo candado.
+  insert into auth.users (id, email) values (gen_random_uuid(), 'duenio@casa.test')
+    returning id into v_duenio;
+  insert into auth.users (id, email) values (gen_random_uuid(), 'otro@casa.test')
+    returning id into v_otro;
+
+  -- 1) recien instalada: sin dueno
+  v_arranca_ok := (public.casa_fundada() = false);
+
+  -- 2) sin designado no se funda
+  perform _p.actuar_como(v_duenio);
+  begin
+    perform public.fundar_super_admin('DUE1', 'Dueno de la casa');
+  exception when others then
+    v_sql_a := sqlstate;
+  end;
+  v_sin_designado_ok := v_sql_a = 'P0001'
+    and public.casa_fundada() = false
+    and not exists (select 1 from public.profiles p where coalesce(p.es_admin,false));
+
+  -- Se designa al dueno. CON MAYUSCULAS A PROPOSITO: el correo que escribe
+  -- quien instala no tiene por que coincidir en capitalizacion con el que la
+  -- persona uso al registrarse, y hacerle fallar por eso solo garantiza que
+  -- acabe pidiendo que alguien entre a la base -- lo que esto viene a evitar.
+  update public.ajustes_instalacion set valor = 'DUENIO@Casa.Test'
+   where clave = 'correo_fundador';
+
+  -- 3) otro correo, rechazado
+  perform _p.actuar_como(v_otro);
+  begin
+    perform public.fundar_super_admin('OTR1', 'El vivo');
+  exception when others then
+    v_sql_b := sqlstate;
+  end;
+  v_otro_correo_ok := v_sql_b = 'P0001'
+    and public.casa_fundada() = false
+    and not exists (select 1 from public.profiles p where p.id = v_otro and coalesce(p.es_admin,false));
+
+  -- 4) codigo mal formado, rechazado
+  perform _p.actuar_como(v_duenio);
+  begin
+    perform public.fundar_super_admin('x', 'Dueno de la casa');
+  exception when others then
+    v_sql_c := sqlstate;
+  end;
+  v_codigo_malo_ok := v_sql_c = 'P0001' and public.casa_fundada() = false;
+
+  -- 5) el designado funda
+  perform public.fundar_super_admin('DUE1', 'Dueno de la casa');
+
+  select * into v_perfil from public.profiles where id = v_duenio;
+  select count(*)::int into v_asientos
+  from public.admin_actions a where a.action = 'fundar_super_admin';
+
+  v_funda_ok :=
+        coalesce(v_perfil.es_admin, false)
+    and coalesce(v_perfil.es_super_admin, false)
+    and v_perfil.admin_codigo = 'DUE1'
+    and v_perfil.admin_nombre = 'Dueno de la casa'
+    and public.casa_fundada() = true
+    and v_asientos = 1;
+
+  -- 6) segunda vez: aunque se designe al otro, ya hay dueno
+  update public.ajustes_instalacion set valor = 'otro@casa.test'
+   where clave = 'correo_fundador';
+  perform _p.actuar_como(v_otro);
+  begin
+    perform public.fundar_super_admin('OTR1', 'El vivo');
+  exception when others then
+    v_sql_d := sqlstate;
+    v_msg_d := sqlerrm;
+  end;
+  v_segunda_ok := v_sql_d = 'P0001'
+    and v_msg_d like '%ya tiene dueno%'
+    and not exists (select 1 from public.profiles p where p.id = v_otro and coalesce(p.es_super_admin,false));
+
+  -- 8) permisos
+  v_permisos_ok :=
+        has_function_privilege('anon',          'public.casa_fundada()', 'execute')
+    and has_function_privilege('authenticated', 'public.casa_fundada()', 'execute')
+    and has_function_privilege('authenticated', 'public.fundar_super_admin(text,text)', 'execute')
+    and not has_function_privilege('anon',      'public.fundar_super_admin(text,text)', 'execute');
+
+  -- La clave vuelve a su estado de instalacion nueva.
+  update public.ajustes_instalacion set valor = '' where clave = 'correo_fundador';
+
+  perform _p.anotar(73, 'La casa se funda sola, una vez, y solo quien fue designado',
+    'sin designado no se funda; otro correo se rechaza; el designado funda con codigo y nombre y deja UN asiento; la segunda vez se rechaza aunque cambien el designado; anon puede preguntar si esta fundada pero no fundar',
+    v_arranca_ok and v_sin_designado_ok and v_otro_correo_ok and v_codigo_malo_ok
+      and v_funda_ok and v_segunda_ok and v_permisos_ok,
+    format('arranca_sin_duenio=%s | sin_designado=%s (%s) | otro_correo=%s (%s) | codigo_malo=%s (%s) | FUNDA=%s (super=%s codigo=%s nombre=%s asientos=%s) | SEGUNDA=%s (%s: %s) | permisos=%s',
+      v_arranca_ok,
+      v_sin_designado_ok, coalesce(v_sql_a,'sin excepcion'),
+      v_otro_correo_ok,   coalesce(v_sql_b,'sin excepcion'),
+      v_codigo_malo_ok,   coalesce(v_sql_c,'sin excepcion'),
+      v_funda_ok, coalesce(v_perfil.es_super_admin,false), coalesce(v_perfil.admin_codigo,'-'),
+      coalesce(v_perfil.admin_nombre,'-'), v_asientos,
+      v_segunda_ok, coalesce(v_sql_d,'sin excepcion'), coalesce(left(v_msg_d,45),'-'),
+      v_permisos_ok));
 end $$;
 
 

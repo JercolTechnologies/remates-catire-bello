@@ -1136,3 +1136,39 @@ Las dos guardas que había (`if (saving) return` y `if (createdRemateId)`) son *
 **Hay `DROP` de la firma vieja.** `create or replace` no puede añadir un parámetro: crearía una función **nueva** y dejaría la de tres argumentos viva. Dos sobrecargas con el mismo nombre dejan a PostgREST eligiendo, y no para la función que crea remates.
 
 **Consecuencias.** `P72`, siete condiciones, incluida la que cierra el bucle: sin clave sigue creando siempre, que es como se comportó hasta hoy y como se comporta el frontend viejo durante el despliegue.
+
+---
+
+## ADR-045 · Lo mejor que le puede pasar al proveedor es no poder entrar
+
+**Fecha.** 10 de octubre de 2026 *(migración `20261010193000`)*
+
+**Contexto.** Pendiente 5.3. El primer administrador de una instalación nueva se creaba con un `UPDATE` a mano en el SQL Editor, **hecho por Jercol dentro de la base del cliente**. La base que va a tener el dinero de sus jugadores.
+
+Eso tiene dos problemas, y el segundo es el que importa:
+
+1. Con N clientes son N oportunidades de escribir mal un correo, olvidar el `admin_codigo` (ADR-027) o afectar cero filas sin darse cuenta.
+2. **Si el proveedor puede entrar a la base del cliente, el proveedor puede tocar el registro de su dinero.** Y el día que falte un bolívar, el último que estuvo ahí fue el proveedor. No alcanza con no hacerlo: hay que **no poder**.
+
+**Decisión: `fundar_super_admin(codigo, nombre)`, con dos candados en la base.**
+
+**No se podía simplemente poner un botón.** Huevo y gallina a propósito: `nombrar_admin` exige un super admin, y en una base nueva no hay ninguno. Si fundar fuera libre, **el primero que se registrara se quedaría con la casa** — con poder para aprobar recargas, pagar retiros y liquidar remates.
+
+1. **Solo si no existe ningún super admin.** Se cierra sola, para siempre, tras el primer uso. No es una bandera que alguien pueda volver a levantar: es el propio estado de `profiles`.
+2. **El correo tiene que coincidir** con `ajustes_instalacion.correo_fundador`, que el instalador deja puesto. Sin el segundo candado, el primero de la fila se queda la casa igual que antes.
+
+Jercol **sigue** escribiendo una fila en la base del cliente. Pero lo hace **al instalar, antes de que exista un solo bolívar**, y no después con el dinero dentro. Es una diferencia de naturaleza, no de grado.
+
+**El error del segundo candado no dice cuál es el correo esperado.** Si lo dijera, cualquiera con una cuenta podría llamar a la función y averiguar el correo del dueño. Depurar un correo mal escrito es cosa de quien lo escribió, que tiene acceso a la tabla.
+
+**`casa_fundada()` la lee `anon`, y eso es deliberado.** La pantalla tiene que saber qué ofrecer **antes** de pedir credenciales. Lo único que revela es si hay dueño o no — nunca el correo designado.
+
+**La pantalla NO cierra la sesión cuando la casa no tiene dueño.** El flujo de siempre, si entras y no eres admin, hace `signOut()` y te echa. Correcto cuando la casa ya tiene dueño, y exactamente lo que no puede pasar cuando no lo tiene: `fundar_super_admin()` actúa sobre **quien la llama** y necesita la sesión viva.
+
+**Y se arregló un defecto que solo se ve trazando el código.** Quien se registraba en una instalación recién entregada caía en `/dashboard` — el panel de **jugador**, con saldo 0 y sin remates. El futuro dueño de la casa aterrizaba en la pantalla de un apostador vacío, y para llegar a `/admin/login` tenía que saber que esa ruta existe: **no había ni un enlace** que llevara ahí. La aplicación estaba lista para funcionar y no tenía forma de decirle al dueño cómo empezar.
+
+`AvisoFundar` lo resuelve con una franja ámbar **en el layout** —no en una pantalla, porque el licenciatario puede entrar por la portada, por `/remates` o por `/dashboard` y tiene que encontrarla en las tres (ADR-026)— que **se apaga sola y para siempre** en cuanto alguien funda.
+
+**El código y el nombre se piden al fundar, no después.** Cada acción del panel queda firmada con ellos en la bitácora (ADR-027). Pedirlos aquí evita estrenar la casa con el mismo defecto que el aviso ámbar de `/admin/super/admins` viene a señalar.
+
+**Consecuencias.** `P73`, siete condiciones. La que da la medida es la sexta: tras fundar, se **cambia** el correo designado al de otra persona y se intenta de nuevo — y se rechaza igual, porque el candado de «ya hay dueño» manda sobre el del correo. Y la octava: `anon` puede preguntar si la casa está fundada, pero no fundarla.

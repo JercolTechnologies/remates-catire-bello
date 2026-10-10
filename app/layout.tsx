@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AvisosDelUsuario from "./components/AvisosDelUsuario";
+import AvisoFundar from "./components/AvisoFundar";
 import CabeceraCliente from "./components/CabeceraCliente";
 import NavegacionCliente from "./components/NavegacionCliente";
 import { RematesEnVivo } from "./components/RematesEnVivo";
@@ -67,6 +68,9 @@ export default function RootLayout({
             la barra inferior. Ver components/SesionCliente.tsx */}
         <SesionCliente>
         <div className="min-h-screen flex flex-col">
+          {/* "Esta casa todavia no tiene dueno". Se apaga solo y para siempre
+              en cuanto alguien funda. Ver components/AvisoFundar.tsx */}
+          <AvisoFundar />
           {/* La cabecera del jugador: marca, menu de escritorio, y usuario y
               saldo arriba a la derecha. Decide ella sola si toca pintarla.
               Va AQUI y no al final: es `sticky top-0`, y un elemento pegado
