@@ -59,18 +59,101 @@ el número de archivos de `supabase/migrations/`.
 
 ## 3. El despliegue de Vercel
 
-Un proyecto de Vercel nuevo apuntando al mismo repositorio, con dos variables:
+Un proyecto de Vercel nuevo apuntando al mismo repositorio.
+
+> ### ⛔ NO uses la integración «Connect Supabase» de Vercel
+>
+> **Descubierto el 10/10/2026, en la primera instalación real.** Conectar
+> Supabase desde Vercel es un botón y parece lo correcto. Lo que hace es
+> inyectar **catorce variables** en el proyecto, y tres de ellas son las llaves
+> del reino:
+>
+> | Variable | Qué entrega |
+> |---|---|
+> | `SUPABASE_SERVICE_ROLE_KEY` · `SUPABASE_SECRET_KEY` | acceso total **por encima de toda la RLS** (ADR-027) |
+> | `SUPABASE_JWT_SECRET` | permite **firmar un token de cualquier usuario**, incluido un super admin |
+> | `POSTGRES_PASSWORD` y los cuatro `POSTGRES_URL*` | la **conexión directa** a la base, con contraseña |
+>
+> Ninguna de las catorce la lee esta aplicación. No rompen nada, y ese es
+> justo el problema: **no se nota**. Quedan ahí ampliando el daño de
+> cualquier fallo futuro — una ruta nueva mal escrita, un `console.log` en el
+> servidor, una dependencia comprometida, o simplemente darle acceso al panel
+> de Vercel a alguien. Sin ellas, el peor caso es lo que la RLS permita; con
+> ellas, el peor caso es la base entera.
+>
+> **Este documento ya lo decía en el paso 1** —*«Si en algún momento un
+> procedimiento te pide configurarla en algún sitio, para y pregunta»*— y la
+> regla funcionó: lo que no se había previsto es que quien la pusiera no fuera
+> un procedimiento, sino **un botón que no pregunta**.
+>
+> Las variables se ponen **a mano**, una por una. Si ya conectaste la
+> integración, bórralas todas menos las dos públicas y **vuelve a mirar la
+> lista al día siguiente**: la documentación de Supabase dice que los proyectos
+> conectados se «sincronizan automáticamente» y no aclara si las repone. Si
+> vuelven, desconecta la integración.
+
+> ### ⚠️ Corregido el 10/10/2026
+>
+> Este apartado decía que eran **dos** variables y que se comprobaba con
+> `findstr /s /c:"process.env"`. **Las dos cosas eran falsas**, y de la peor
+> manera: la comprobación *pasaba* mientras el dato era incorrecto.
+>
+> `app/api/notify/recarga/route.ts` no lee `process.env.SMTP_USER`. Lee
+> `env("SMTP_USER")`, con un ayudante que hace `process.env[name]`. El
+> `findstr` encuentra esa línea pero **no revela ni un solo nombre**, así que
+> daba una sensación de completitud sin dar la lista.
+>
+> Consecuencia si no se corrige: el licenciatario instala, todo parece
+> funcionar, y el día que un admin aprueba una recarga el correo de aviso
+> devuelve `500 Missing SMTP env` sin que nada explique por qué.
+
+**Las dos imprescindibles.** Sin ellas la aplicación no arranca:
 
 ```
 NEXT_PUBLIC_SUPABASE_URL       = https://<ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY  = <la clave anon del proyecto nuevo>
 ```
 
-Son las dos únicas que lee la aplicación. Comprobable:
+**Las del correo de aviso.** Sin ellas todo lo demás funciona, pero
+`/api/notify/recarga` devuelve `500` y **nadie se entera por correo** de que
+hay una recarga esperando:
+
+```
+SMTP_USER        = la cuenta que envía
+SMTP_PASS        = su contraseña de aplicación, NO la del correo
+NOTIFY_EMAIL_TO  = a quién avisar (si falta, se usa SMTP_USER)
+SMTP_HOST        = opcional, por omisión smtp.gmail.com
+SMTP_PORT        = opcional, por omisión 465
+```
+
+> **El `SMTP_PASS` de Gmail es una «contraseña de aplicación»**, no la del
+> correo. Y es del licenciatario, no tuya: su casa manda sus correos.
+
+**Opcionales:**
+
+```
+APP_URL          = https://<su-dominio>   (enlaces absolutos en los correos)
+NEXT_PUBLIC_SITIO= https://<su-dominio>   (vista previa al compartir el enlace)
+```
+
+`VERCEL_PROJECT_PRODUCTION_URL` la pone Vercel sola; no se configura.
+
+**La comprobación que SÍ sirve** —busca los dos patrones, el directo y el del
+ayudante:
 
 ```powershell
-findstr /s /c:"process.env" app\*.ts* lib\*.ts
+findstr /s /r /c:"process\.env\.[A-Z_]*" /c:"env(\"" app\*.ts* lib\*.ts
 ```
+
+Al 10/10/2026 la lista completa es: `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITIO`,
+`VERCEL_PROJECT_PRODUCTION_URL`, `SMTP_USER`, `SMTP_PASS`, `NOTIFY_EMAIL_TO`,
+`SMTP_HOST`, `SMTP_PORT`, `APP_URL`.
+
+> **Las variables NO van al repositorio.** `.gitignore` incluye `.env*`, así
+> que ningún `.env` viaja a GitHub ni a ningún despliegue. El `.env.local` de
+> tu máquina apunta a **tu** producción y no tiene nada que ver con la
+> instalación del cliente: las suyas se ponen **solo** en su panel de Vercel.
 
 ---
 
@@ -161,6 +244,19 @@ Con el licenciatario delante:
 5. Crea un remate de prueba, puja desde otra cuenta, ciérralo y liquídalo.
    Después **borra los datos de prueba** con
    `docs/supabase/reset_datos_prueba.sql` para que arranque en cero de verdad.
+
+> ### Si es una DEMO y no una entrega
+>
+> Una instalación vacía no enseña nada. Para una demo, en vez del paso 5 corre
+> `docs/supabase/demo_seed.sql`: deja tres remates (uno en vivo, uno
+> adelantado y uno liquidado), 14 caballos con escaleras, tres jugadores con
+> saldo y pujas, **y la contabilidad cuadrada**. El dinero entra por la puerta
+> —solicitud de recarga y aprobación del admin—, no con un `update` a las
+> carteras, justamente para que `/admin/contabilidad` no salga descuadrada en
+> la primera pantalla que abre el que mira.
+>
+> Ese guion **se niega a correr** si la instalación ya tiene remates o
+> recargas aprobadas.
 
 ---
 

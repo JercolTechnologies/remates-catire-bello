@@ -34,6 +34,8 @@ detalla aquí: está en `ADR.md` (44 decisiones) y en el arnés.
 | Los iconos se mudan a `app/`: favicon, icono de iOS y vista previa al compartir | ADR-042 |
 | **Los números de dos caballos ya se pueden intercambiar**: la única pasa a diferible | ADR-043, `20261010140000`, P71 → **cierra el 1.1** |
 | **El doble clic ya no crea dos remates**: clave de idempotencia con índice único detrás | ADR-044, `20261010150000`, P72 → **cierra el 1.2** |
+| **`demo_seed.sql`**: monta una demo creíble con la contabilidad cuadrada, probado contra base limpia | `docs/supabase/demo_seed.sql` |
+| **Corregido el instalador**: decía «dos variables» y son **diez**; la comprobación que daba no encontraba las de correo | `INSTALACION_LICENCIATARIO.md` |
 
 ---
 
@@ -104,6 +106,15 @@ WhatsApp y Telegram**; y `NOTIFY_EMAIL_TO` como lista desde los ajustes de insta
 ## 4 · Interfaz
 
 Lo de la navegación y los anchos se cerró el 09/10 (ADR-040). Queda:
+
+- **Un intercambio de números correcto se ve igual que uno que no hizo nada.**
+  Al guardar, la pantalla recarga los caballos con `.order("numero")`, así que la
+  columna de números vuelve a leerse 1, 2, 3… y lo único que se movió son los
+  nombres. Jota lo dio por fallido el 10/10 cuando en realidad había funcionado;
+  lo zanjó `/admin/log`, que sí lo dice (`Caballo 1 numero: 1 → 2`). No es un
+  defecto de datos, es de acuse de recibo: el guardado no cuenta qué cambió.
+  Lo barato sería que el mensaje de «Cambios guardados» resumiera lo que la base
+  devolvió.
 
 - **`/dashboard/retirar` enseña «Saldo total», que es la misma cifra de la cabecera.**
   Por el criterio que dio Jota —no repetir el mismo dinero dos veces en una pantalla—
