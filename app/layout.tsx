@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AvisosDelUsuario from "./components/AvisosDelUsuario";
+import CabeceraCliente from "./components/CabeceraCliente";
 import NavegacionCliente from "./components/NavegacionCliente";
 import { RematesEnVivo } from "./components/RematesEnVivo";
+import { SesionCliente } from "./components/SesionCliente";
+import { pieDePagina } from "@/lib/marca";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,15 +41,26 @@ export default function RootLayout({
             alimenta la lista publica, el contador del menu y la lista del
             admin. Ver components/RematesEnVivo.tsx */}
         <RematesEnVivo>
+        {/* Quien eres y cuanto tienes, preguntado UNA vez para la cabecera y
+            la barra inferior. Ver components/SesionCliente.tsx */}
+        <SesionCliente>
         <div className="min-h-screen flex flex-col">
+          {/* La cabecera del jugador: marca, menu de escritorio, y usuario y
+              saldo arriba a la derecha. Decide ella sola si toca pintarla.
+              Va AQUI y no al final: es `sticky top-0`, y un elemento pegado
+              arriba tiene que estar arriba en el documento. */}
+          <CabeceraCliente />
           <div className="flex-1">{children}</div>
           <footer className="py-4 text-center text-xs text-zinc-400">
-            Remate Catire Bello ©2026 Todos los derechos reservados. Desarrollado por Jercol Technologies.
+            {/* El año lo calcula lib/marca.ts. Estuvo clavado a mano como
+                "©2026" desde enero, y en enero de 2027 habria mentido. */}
+            {pieDePagina()}
           </footer>
-          {/* El menu de cliente, una sola vez para toda la aplicacion. Decide
-              el solo si toca pintarlo. Ver components/NavegacionCliente.tsx */}
+          {/* El menu de cliente en movil, una sola vez para toda la
+              aplicacion. Ver components/NavegacionCliente.tsx */}
           <NavegacionCliente />
         </div>
+        </SesionCliente>
         </RematesEnVivo>
       </body>
     </html>

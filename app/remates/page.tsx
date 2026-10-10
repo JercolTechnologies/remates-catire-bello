@@ -5,7 +5,6 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
-import { CornerLogo } from "@/app/components/BrandLogo"
 import { useRematesEnVivo } from "@/app/components/RematesEnVivo"
 
 type RemateRow = {
@@ -176,11 +175,8 @@ export default function RematesPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
-        <div className="mx-auto w-full max-w-md">
-          <div className="mb-3">
-            <CornerLogo />
-          </div>
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
+        <div className="mx-auto w-full max-w-7xl">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold">Remates</h1>
           <div className="flex items-center gap-3 text-xs text-zinc-300">
@@ -235,7 +231,7 @@ export default function RematesPage() {
               return (
                 <div key={section.key}>
                   <div className="mb-2 text-xs uppercase tracking-wide text-zinc-400">{section.label}</div>
-                  <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {list.map((r) => {
               const race = racesById[r.race_id]
               return (

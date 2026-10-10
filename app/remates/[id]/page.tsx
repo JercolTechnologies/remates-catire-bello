@@ -7,7 +7,6 @@ import Link from "next/link"
 import { useParams } from "next/navigation"
 import { useSenal, topicoRemate, EVENTOS_REMATE } from "@/lib/realtime"
 import { supabase } from "@/lib/supabaseClient"
-import { CornerLogo } from "@/app/components/BrandLogo"
 import ConfirmarPuja, { cuentasDelAviso, type PujaPropuesta } from "@/app/components/ConfirmarPuja"
 
 type RemateRow = {
@@ -548,7 +547,7 @@ export default function RemateDetallePage() {
   const isArchived = !!remate?.archived_at
   if (remate && (isCancelled || isArchived)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-950 text-zinc-50 px-4">
+      <div className="min-h-[60vh] flex items-center justify-center bg-zinc-950 text-zinc-50 px-4">
         <div className="w-full max-w-md rounded-2xl bg-zinc-900/60 border border-zinc-800 p-5 text-center">
           <h1 className="text-lg font-semibold">Remate no disponible</h1>
           <p className="mt-2 text-sm text-zinc-300">
@@ -569,7 +568,7 @@ export default function RemateDetallePage() {
 
   if (remate && !isAdmin && (!isWindowOpen || String(remate.estado || "").toLowerCase() !== "abierto")) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-950 text-zinc-50 px-4">
+      <div className="min-h-[60vh] flex items-center justify-center bg-zinc-950 text-zinc-50 px-4">
         <div className="w-full max-w-md rounded-2xl bg-zinc-900/60 border border-zinc-800 p-5 text-center">
           <h1 className="text-lg font-semibold">Remate no disponible</h1>
           <p className="mt-2 text-sm text-zinc-300">Este remate no está abierto para pujar en este momento.</p>
@@ -584,14 +583,8 @@ export default function RemateDetallePage() {
   if (!remate) {
     return (
       <>
-        <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
-          <div className="mx-auto w-full max-w-md">
-            <div className="mb-3">
-              <CornerLogo />
-            </div>
-            <Link href="/remates" className="text-xs text-zinc-300 underline underline-offset-4">
-              Volver
-            </Link>
+        <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
+          <div className="mx-auto w-full max-w-3xl">
             <div className="mt-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4">
               <p className="text-sm text-zinc-200">No se encontró el remate.</p>
             </div>
@@ -609,15 +602,9 @@ export default function RemateDetallePage() {
 
   return (
     <>
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
-        <div className="mx-auto w-full max-w-md">
-          <div className="mb-3">
-            <CornerLogo />
-          </div>
-          <div className="flex items-center justify-between">
-            <Link href="/remates" className="text-xs text-zinc-300 underline underline-offset-4">
-              Volver
-            </Link>
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="flex items-center justify-end">
             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${badgeClass(remate.estado)}`}>
               {remate.estado}
             </span>

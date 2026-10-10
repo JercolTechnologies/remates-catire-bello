@@ -6,7 +6,6 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { CornerLogo } from "@/app/components/BrandLogo"
 
 type WalletRow = {
   id: string
@@ -263,8 +262,8 @@ export default function DashboardPage() {
 
   if (!userId) {
     return (
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
-        <div className="mx-auto w-full max-w-md">
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
+        <div className="mx-auto w-full max-w-3xl">
           <h1 className="text-xl font-bold">Mi Panel</h1>
           <div className="mt-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4 text-sm text-zinc-200">
             Inicia sesión para ver tu saldo, recargar, retirar y pujar.
@@ -296,11 +295,8 @@ export default function DashboardPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 py-6">
-        <div className="mx-auto w-full max-w-md">
-          <div className="mb-3">
-            <CornerLogo />
-          </div>
+      <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
+        <div className="mx-auto w-full max-w-3xl">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold">Mi Panel</h1>
             {userId ? (

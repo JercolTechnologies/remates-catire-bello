@@ -1,15 +1,15 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (39 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (41 decisiones) y en el arnés.
 
 **Estado del proyecto:** 70/70 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 42 migraciones, 39 ADRs.
+31 en `tests/aviso_puja.mjs`. 42 migraciones, 41 ADRs.
 
 ---
 
-## Cerrado el 7 y el 8 de octubre
+## Cerrado del 7 al 10 de octubre
 
 | Qué | Dónde |
 |---|---|
@@ -23,6 +23,12 @@ detalla aquí: está en `ADR.md` (39 decisiones) y en el arnés.
 | Claude ejecuta los comandos locales; Jota conserva el push a la base y todo git | `CLAUDE.md` §1 |
 | **`guardar_remate_completo`**: editar un remate es una transacción, y los cambios de un caballo dejan asiento | ADR-039, `20261008150000`, P70 |
 | `races` y `horses` bajan a **solo lectura**: cerradas las tres tablas del catálogo | ADR-039, P48 |
+| **Navegación del panel de admin**: barra lateral en pc, barra inferior con cajón en móvil; fuera los «Volver» | ADR-040 |
+| **Navegación del lado cliente**: cabecera con marca, menú en pc y usuario + saldo arriba a la derecha | ADR-040 |
+| **Los anchos dejan de ser de móvil en escritorio**: `Contenedor.tsx` y la lista de remates en rejilla | ADR-040 |
+| El `©2026` del pie lo calcula `lib/marca.ts` | ADR-040 |
+| **`/admin` deja de ser un menú duplicado** y pasa a «Estado de la casa»: cola de trabajo con antigüedad, balance y resultado | ADR-041 |
+| **«Se debe» discriminado**: saldos de jugadores y retiros por pagar, por separado — y sin migración | ADR-041 |
 
 ---
 
@@ -72,6 +78,15 @@ por algo que decidimos dejar así. Es una línea de migración y apretar P36.
 - **Cambiar una escalera no emite señal de realtime.** No hay ningún trigger sobre
   `remate_price_rules`, así que las pantallas abiertas siguen enseñando el mínimo viejo
   hasta que alguien recargue.
+- **«Se debe» discriminado: hecho en `/admin`, pendiente en `/admin/contabilidad`.**
+  La suma `obligaciones = saldos + retiros pendientes` **es correcta y está
+  comprobada** (09/10): `solicitar_retiro` descuenta el saldo al pedir el retiro,
+  así que un retiro pendiente ya salió de `saldos` y no se cuenta dos veces. Que
+  nadie «arregle» un defecto que no existe. El desglose ya se ve en «Estado de la
+  casa» (ADR-041) usando `saldo_usuarios` y `retiros_pendientes` de
+  `admin_contabilidad_resumen`, **sin tocar la base**. La tarjeta de contabilidad
+  sigue enseñando solo el total: es el mismo cambio de dos líneas, cuando se pula
+  esa pantalla.
 - **Pantalla de solicitudes rechazadas.** `/admin/log` ya deja verlas en Acciones, pero
   no hay una lista de solicitudes por estado.
 - **Campos de recarga según el método de pago.** Regla de Jota: titular y **últimos 4
@@ -95,14 +110,22 @@ WhatsApp y Telegram**; y `NOTIFY_EMAIL_TO` como lista desde los ajustes de insta
 
 ## 4 · Interfaz
 
-- **Navbar arriba.** Decisión de forma pendiente de Jota.
-- **Nombre de usuario visible en todas las secciones, y debajo el saldo.**
-- **La ficha del remate vive en un `max-w-md` (448 px) también en escritorio**, así que
-  la tabla de 5 columnas se aprieta. Anterior al 07/10, pero se nota.
+Lo de la navegación y los anchos se cerró el 09/10 (ADR-040). Queda:
+
+- **`/dashboard/retirar` enseña «Saldo total», que es la misma cifra de la cabecera.**
+  Por el criterio que dio Jota —no repetir el mismo dinero dos veces en una pantalla—
+  debería entrar en la lista de pantallas que lo ocultan. Él nombró dos (su panel y la de
+  pujar), así que lo dejo preguntado, no decidido. Es una línea en `yaEnsenaElSaldo`,
+  en `components/CabeceraCliente.tsx`.
+- **`/reglas` no está en el menú.** La barra inferior ya lleva cinco botones y un sexto en
+  un móvil estrecho los deja ilegibles. Hoy se llega desde el enlace de la lista de
+  remates y del registro. Si Jota la quiere en el menú, hay que sacar otra.
 - **Ver incremento y pozo por caballo** desde la pantalla de admin.
 - **`/contactanos`**: la información está, los enlaces no son activos.
-- **`©2026` clavado** en el pie.
-- **El logo «parece muy IA»** — criterio de Jota.
+- **El logo «parece muy IA»** — criterio de Jota. El vectorial está pedido al diseñador.
+- **La marca todavía no está cableada.** `lib/marca.ts` y los assets de `public/marca/`
+  existen y están medidos (`docs/MARCA.md`), pero `BrandLogo.tsx`, el `title` del layout,
+  la portada y los iconos de `app/` siguen con los valores viejos. Es el bloque siguiente.
 
 ---
 
@@ -126,6 +149,16 @@ coincida con uno puesto en `ajustes_instalacion` durante la instalación. Sin el
 cualquiera que se registre antes que el dueño se queda con la casa.
 
 ### 5.4 · Resto del bloque
+- **Ganancias por remates discriminadas** (decisión de Jota pendiente, y es de negocio,
+  no técnica). Hoy salen en una sola cifra. El reparto YA existe dentro de
+  `admin_contabilidad_resumen`: el CTE `calc` distingue `ganador_user_id is null`
+  → la casa se queda el pozo entero, si no → `pozo * pct/100`. Sale sumado en
+  `remates_casa_total`. Son **dos claves más en el jsonb**, sin cambio de tipo de
+  retorno — migración trivial. Lo que hay que decidir primero: las categorías
+  honestas son **tres**, no dos. (1) Comisión sobre pozos que ganó un jugador.
+  (2) Pozos completos que ganó la casa. (3) **Los caballos que nadie pujó**, que la
+  casa banca por su `precio_salida` y entran al pozo sin que nadie ponga ese dinero
+  — hoy mezclados dentro de (1) y (2). ¿Es (3) una categoría propia?
 - **Ajustes de instalación completos**: datos bancarios, % de la casa por defecto, SMTP,
   marca. Hoy la tabla tiene tres claves.
 - **Marca configurable**: `BrandLogo.tsx`, textos y assets están fijos a «Catire Bello».

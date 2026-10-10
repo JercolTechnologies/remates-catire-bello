@@ -983,3 +983,68 @@ foto después: 1=Relampago/150.00, 2=Dos/100.00, 7=Centella/120.00
 ```
 
 Idéntica. Antes, el 1 y el 2 se habrían quedado cambiados.
+
+---
+
+## ADR-040 · El «Volver» era el síntoma; la enfermedad era que no había navegación
+
+**Fecha.** 9 de octubre de 2026 *(sin migración: esto es todo frontend)*
+
+**Contexto.** Jota, en mayúsculas y con razón: *«ME TIENE ENFERMO EL PUTO BOTONSITO DE VOLVER, VOLVER, VOLVER»*.
+
+Medido antes de tocar nada: **11 pantallas de admin con cero navegación** y **10 enlaces «Volver»** en el lado cliente. El «Volver» no era un botón feo: era el único camino entre pantallas. Para ir de `/admin/recargas` a `/admin/retiros` había que volver a `/admin`, leer el menú y entrar. Y como cada pantalla se lo dibujaba a su manera, el mismo gesto estaba en cuatro sitios distintos y con cuatro estilos.
+
+Un enlace «Volver» además **miente sobre a dónde lleva**: no vuelve a la pantalla anterior, lleva a la que el programador supuso que era la anterior. Desde `/reglas`, al que había llegado desde el registro, «Volver a remates» no era volver.
+
+**Decisión: el marco de la aplicación vive por encima de las pantallas, una sola vez, y las pantallas no se dibujan su navegación.** Es el ADR-026 otra vez, aplicado a la navegación.
+
+- **Panel de admin:** barra lateral en escritorio, barra inferior con cajón en móvil. Cuatro grupos (Caja / Remates / Casa / Ajustes). Los contadores salen de `useCajaEnVivo()` — no se recalculan, así que no pueden discrepar del aviso de caja.
+- **Lado cliente:** cabecera `sticky` con la marca y, en escritorio, el menú; barra inferior **solo en móvil**, que es donde Jota la quiere y donde llega el pulgar.
+
+**Por qué la cabecera se queda incluso donde el saldo se oculta.** Jota pidió que el nombre y el saldo **no** salieran en su panel ni en la pantalla de pujar, porque ahí los tres saldos ya están en grande: dos cifras del mismo dinero en una pantalla hacen dudar cuál es la buena. Correcto. Pero lo que se oculta es **el bloque de usuario y saldo, no la cabecera**, y el motivo es duro: en escritorio el menú vive en la cabecera. Si la cabecera desapareciera en esas dos pantallas, un jugador con portátil se quedaría ahí **sin ninguna forma de salir** — el problema del «Volver» reintroducido por la puerta de atrás.
+
+**Un proveedor pregunta, dos componentes pintan.** La cabecera y la barra inferior necesitan lo mismo (sesión, rol, nombre, saldo) y no pueden ser el mismo componente porque una va arriba del contenido y la otra abajo. `SesionCliente` lo resuelve **una vez** para toda la aplicación; `CabeceraCliente` y `NavegacionCliente` solo pintan. Es la forma de `CajaEnVivo` en el panel, y por el mismo motivo: dos consultas de lo mismo son dos verdades que acabarán discrepando.
+
+**Y un solo menú.** `enlacesCliente.ts` declara los enlaces y, con ellos, qué cuenta como «estar en esta pantalla» — `/remates` sigue marcado dentro de un remate concreto, `/dashboard` **no** se marca en `/dashboard/retirar` porque retirar es su propio botón. Dos listas habrían ofrecido menús distintos en móvil y en escritorio a la primera pantalla nueva.
+
+**Los anchos, que era la otra mitad de la queja.** *«en pc se vea normal y no un rectángulo en el medio»*. Era literal: `max-w-md` —448 px, el ancho de un móvil— aparecía **24 veces**. En un monitor de 27 pulgadas la aplicación entera era una columna estrecha entre dos desiertos. `Contenedor.tsx` declara tres anchos con su motivo: `lectura` (448, formularios de una columna, donde 448 **es** lo correcto), `normal` (768) y `ancho` (1280, tablas y listas). En la lista de remates el cambio de verdad no es la tarjeta más ancha sino **cuántas caben**: pasa a rejilla de 2 y 3 columnas.
+
+**Qué «Volver» sobreviven, y por qué.** Los de `/login`, `/register` y `/auth/reset`: son pantallas de autenticación, no llevan marco, y ese enlace es la única salida. Y los dos de «remate no disponible»: ahí el enlace **es la acción**, no decoración de chrome.
+
+**Una línea de regalo, dicha para que no sea una sorpresa en el diff.** El pie de página tenía `©2026` escrito a mano desde enero; ahora lo calcula `lib/marca.ts`. En enero de 2027 habría mentido.
+
+**Lo que queda abierto.** `/dashboard/retirar` enseña «Saldo total: Bs X», que es **exactamente** la cifra de la cabecera. Por el criterio que dio Jota debería ocultarse ahí también; no lo meto por mi cuenta porque él nombró dos pantallas, no tres. Es una línea en `yaEnsenaElSaldo`.
+
+**Consecuencias.** No hay prueba automática de esto: es disposición en pantalla, y lo que la valida es mirarla. `tsc` limpio, `eslint` sin añadir ni un problema nuevo a los seis archivos tocados, `next build` verde.
+
+---
+
+## ADR-041 · `/admin` deja de ser el menú y pasa a decir cómo está la casa
+
+**Fecha.** 10 de octubre de 2026 *(sin migración)*
+
+**Contexto.** `/admin` eran 166 líneas, y de ellas un bloque «Acciones» con **ocho enlaces**. Los ocho están desde ayer en la barra lateral (ADR-040), así que al entrar al panel se veía el menú **dos veces en la misma pantalla**. Y la copia del medio ya estaba desactualizada: la barra lleva 9 destinos, el bloque llevaba 7 — faltaban **Usuarios** y **Soporte**, que nacieron después. Nadie actualiza dos listas de lo mismo; es el ADR-015 aplicado a la navegación.
+
+Hasta ADR-040 ese menú estaba justificado, porque `/admin` **era** el único sitio donde existía la lista de destinos. Al dejar de serlo, la pregunta que esta pantalla tiene que responder cambia: no «a dónde puedo ir», sino **cómo está la casa ahora mismo**.
+
+**Decisión: tres bloques, en orden de urgencia.**
+
+**1 · Cola de trabajo, y la cifra que importa no es el monto.** Jota: *«un retiro pendiente no debería ser tal cosa por mucho tiempo, de hecho eso debería ser cuestión de minutos, no de horas ni mucho menos días»*. Si eso es cierto, lo informativo es la **antigüedad del más viejo**, no la cantidad: «2 retiros pendientes» no dice nada, «2 retiros, el más viejo hace 3 horas» dice que la casa está operando mal. Un jugador que espera un pago tres días no vuelve, y lo cuenta. Dos umbrales (15 y 60 minutos) traducen esa frase a colores, declarados en dos constantes.
+
+**2 · Balance, con el «Debe» por fin partido.** Y aquí me corrijo: **dije que hacía falta una migración y no hacía falta.** `casa_resumen()` devuelve `obligaciones` sumado, pero `admin_contabilidad_resumen()` —que la pantalla de contabilidad ya llama— devuelve **las dos mitades por separado y con la definición idéntica**: `saldo_usuarios` es `sum(saldo_disponible + saldo_bloqueado)` de `wallets`, y `retiros_pendientes` es `sum(monto)` de los retiros pendientes. Son los mismos dos CTEs que `casa_resumen` suma. Lo afirmé sin medir hasta el fondo; la corrección salió de leer las dos funciones enteras, que es la lección de siempre.
+
+Por qué importa partirlo, y no es estética: los saldos son **flotante** —dinero del jugador que puede que nunca pida— y los retiros pendientes son **pagos que hay que hacer ya**. Con una sola cifra de 50.000 Bs el dueño no sabe si puede retirar utilidades o si tiene que dejar 8.000 quietos para mañana. Eso es una decisión de dinero.
+
+**3 · Las recargas pendientes no están en el balance, y es correcto.** Una recarga pendiente **no es dinero**: no está en caja (`casa_resumen` solo cuenta las `'aprobado'`) ni en obligaciones (la cartera no se acredita hasta aprobar). Es una promesa del jugador, y su sitio es la cola de trabajo. Un retiro pendiente **sí** es deuda, y la más urgente, porque `solicitar_retiro` ya le descontó el saldo al jugador al pedirlo (`20261006110000`): la casa ya tiene ese dinero fuera de la cuenta del jugador y todavía no lo ha entregado. Por eso entra en `obligaciones`, y por eso **no** hay doble conteo con los saldos.
+
+**Esta pantalla no hace ni una suma de dinero.** Pinta lo que devuelven las dos RPC. Calcular aquí sería tener dos sitios diciendo cuánto debe la casa (ADR-015) y aritmética de dinero en JavaScript (ADR-035). También se descartó sumar el libro en el navegador: `/admin/contabilidad` lo lee con `.limit(15)`, y sumar por categoría obligaría a traer la tabla entera — a 1.000 remates, 1.000 filas para pintar dos cifras.
+
+**El descuadre solo aparece cuando hay descuadre.** Un cero permanente en pantalla se vuelve invisible, y el día que deje de ser cero nadie lo nota.
+
+**Lo que NO se puede todavía, dicho para que no se busque en vano.** Las ganancias por remates salen en **una** cifra. El reparto existe dentro de `admin_contabilidad_resumen` —el CTE `calc` ya distingue `ganador_user_id is null` → la casa se queda el pozo entero, si no → `pozo * pct/100`— pero sale sumado en `remates_casa_total`. Son **dos claves más en el jsonb**, sin cambio de tipo de retorno: migración trivial, pero migración.
+
+Y antes de escribirla hay una decisión que no es técnica: las categorías honestas son **tres**, no dos. Comisión sobre pozos que ganó un jugador; pozos completos que ganó la casa; y **los caballos que nadie pujó**, que la casa banca por su `precio_salida` y entran al pozo sin que nadie ponga ese dinero — hoy mezclados dentro de las otras dos. Es Jota quien decide si el tercero es categoría propia.
+
+**El reloj.** La antigüedad se calcula con el reloj del **navegador** contra `created_at`. Con la hora desajustada, el número miente. Es el mismo defecto ya anotado para la ventana del remate; para un indicador de cola es tolerable, para decidir dinero no se usaría.
+
+**Consecuencias.** 166 líneas de menú duplicado fuera. `tsc` limpio, `eslint` sin un solo problema en el archivo, `next build` verde. No hay prueba automática: es una pantalla de lectura, y lo que la valida es comparar sus cifras con `/admin/contabilidad`, que lee las mismas dos funciones.

@@ -32,8 +32,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
-import { CornerLogo } from "@/app/components/BrandLogo"
 import { supabase } from "@/lib/supabaseClient"
 
 function Bloque({ titulo, children }: { titulo: string; children: React.ReactNode }) {
@@ -73,17 +71,10 @@ export default function ReglasPage() {
   const reglaDelPorcentajeAplica = pctNum !== null && Number.isFinite(pctNum) && pctNum > 0
 
   return (
-    <main className="min-h-dvh bg-zinc-950 text-zinc-50 px-4 py-6">
-      <div className="mx-auto w-full max-w-2xl">
-        <div className="mb-3">
-          <CornerLogo />
-        </div>
-
+    <main className="min-h-dvh bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
+      <div className="mx-auto w-full max-w-3xl">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">Reglas del Remate</h1>
-          <Link href="/remates" className="text-xs text-zinc-300 underline underline-offset-4">
-            Volver a remates
-          </Link>
         </div>
 
         <div className="mt-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4 text-sm text-zinc-200">

@@ -4,7 +4,6 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
-import { CornerLogo } from "@/app/components/BrandLogo"
 
 /**
  * Tipos mínimos para mostrar el saldo.
@@ -172,10 +171,7 @@ export default function RetirarPage() {
   if (!userId) {
     return (
       <div className="min-h-dvh bg-gray-950 text-gray-50">
-        <div className="mx-auto w-full max-w-md px-4 py-6">
-          <div className="mb-3">
-            <CornerLogo />
-          </div>
+        <div className="mx-auto w-full max-w-md px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-semibold">Retirar saldo</h1>
             <Link href="/remates" className="text-sm text-gray-300 underline underline-offset-4">
@@ -216,15 +212,9 @@ export default function RetirarPage() {
   return (
     <>
       <div className="min-h-dvh bg-gray-950 text-gray-50">
-        <div className="mx-auto w-full max-w-md px-4 py-6">
-          <div className="mb-3">
-            <CornerLogo />
-          </div>
+        <div className="mx-auto w-full max-w-md px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-semibold">Retirar saldo</h1>
-            <Link href="/dashboard" className="text-sm text-gray-300 underline underline-offset-4">
-              Volver
-            </Link>
         </div>
 
         <p className="mt-2 text-sm text-gray-300">Solicita tu retiro y el admin lo procesa manualmente.</p>
