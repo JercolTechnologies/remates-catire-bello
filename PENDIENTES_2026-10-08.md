@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (41 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (42 decisiones) y en el arnés.
 
 **Estado del proyecto:** 70/70 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 42 migraciones, 41 ADRs.
+31 en `tests/aviso_puja.mjs`. 42 migraciones, 42 ADRs.
 
 ---
 
@@ -29,6 +29,9 @@ detalla aquí: está en `ADR.md` (41 decisiones) y en el arnés.
 | El `©2026` del pie lo calcula `lib/marca.ts` | ADR-040 |
 | **`/admin` deja de ser un menú duplicado** y pasa a «Estado de la casa»: cola de trabajo con antigüedad, balance y resultado | ADR-041 |
 | **«Se debe» discriminado**: saldos de jugadores y retiros por pagar, por separado — y sin migración | ADR-041 |
+| **Vectoriales de la marca**, sacados de los PNG: 7 SVG, versión mono recoloreable | `docs/MARCA.md`, `marca_vectorizar.py` |
+| **La marca, cableada**: `lib/marca.ts` deja de ser una costura sin coser; SVG en toda la interfaz | ADR-042 |
+| Los iconos se mudan a `app/`: favicon, icono de iOS y vista previa al compartir | ADR-042 |
 
 ---
 
@@ -122,10 +125,20 @@ Lo de la navegación y los anchos se cerró el 09/10 (ADR-040). Queda:
   remates y del registro. Si Jota la quiere en el menú, hay que sacar otra.
 - **Ver incremento y pozo por caballo** desde la pantalla de admin.
 - **`/contactanos`**: la información está, los enlaces no son activos.
-- **El logo «parece muy IA»** — criterio de Jota. El vectorial está pedido al diseñador.
-- **La marca todavía no está cableada.** `lib/marca.ts` y los assets de `public/marca/`
-  existen y están medidos (`docs/MARCA.md`), pero `BrandLogo.tsx`, el `title` del layout,
-  la portada y los iconos de `app/` siguen con los valores viejos. Es el bloque siguiente.
+- **El logo «parece muy IA»** — criterio de Jota. Los vectoriales ya **no** dependen
+  del diseñador: se sacaron de los propios PNG el 10/10 (`herramientas/marca_vectorizar.py`,
+  siete SVG, el isotipo de 1.008 KB a **4,3 KB**). Al diseñador le sigue conviniendo
+  pedirle el suyo para tener **el metal en vector**, pero no bloquea nada. Y si lo que
+  molesta es el aspecto «IA», el culpable es el biselado 3D con destellos: la versión
+  plana de estos SVG lo quita sin tocar el dibujo.
+- **La marca del licenciatario todavía es una constante.** `CASA` en `lib/marca.ts` está
+  en `null` y se edita a mano. El destino es `ajustes_instalacion`, que ya existe en la
+  base con tres claves y ya tiene lectura pública por lista blanca (`ajustes_publicos()`,
+  ADR-029): el día que se añadan las claves de marca, cambia la función de `lib/marca.ts`
+  y **ninguna pantalla se entera** — eso ya está cableado así (ADR-042). Está en 5.4.
+- **El isotipo se usa en versión con degradado, no `-mono`.** Las piezas `-mono`
+  (`currentColor`) existen y están listas, pero nadie las usa todavía. Son las que harán
+  falta el día que un licenciatario quiera su color.
 
 ---
 

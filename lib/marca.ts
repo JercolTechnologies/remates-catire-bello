@@ -47,14 +47,57 @@ export type Marca = {
   vertical: string
   /** Solo el simbolo, sin texto. Barras, iconos, avatares. */
   isotipo: string
+  /** Las mismas piezas en `currentColor`, para pintarlas con CSS. */
+  mono: { horizontal: string; vertical: string; isotipo: string }
+  /** La proporcion de cada pieza, para no repetir numeros en cada pantalla. */
+  tam: {
+    horizontal: { w: number; h: number }
+    vertical: { w: number; h: number }
+    isotipo: { w: number; h: number }
+  }
 }
 
+/**
+ * SVG, no PNG, desde el 10/10/2026.
+ *
+ * Los vectoriales se sacaron de los propios PNG con
+ * `herramientas/marca_vectorizar.py` -- el disenador nunca entrego ninguno.
+ * El isotipo pasa de 1.008 KB a 4,3 KB y ademas se ve mejor a cualquier
+ * tamano. El procedimiento, lo que estos SVG NO son, y por que, estan en
+ * `docs/MARCA.md`.
+ *
+ * NO HACE FALTA TOCAR `next.config.ts`. La documentacion de Next 16 dice:
+ * "We recommend using the `unoptimized` prop when the `src` prop is known to
+ * be SVG. This happens automatically when `src` ends with `.svg`". Es decir,
+ * `next/image` con un .svg se salta el optimizador solo, y por eso NO hace
+ * falta `dangerouslyAllowSVG`, que es la bandera que habria que poner si el
+ * SVG pasara por el optimizador.
+ *
+ * Los PNG de 3,3 MB se quedan para lo que un vector plano no cubre: los
+ * iconos del sistema operativo (`app/icon.png`, `apple-icon.png`) y la vista
+ * previa al compartir (`opengraph-image.png`), que tienen que ser mapas de
+ * bits por exigencia de iOS y de las redes.
+ */
 export const PLATAFORMA: Marca = {
   nombre: "Remate Catire Bello",
   corto: "Catire Bello",
-  horizontal: "/marca/logo-horizontal.png",
-  vertical: "/marca/logo-vertical.png",
-  isotipo: "/marca/isotipo.png",
+  horizontal: "/marca/logo-horizontal.svg",
+  vertical: "/marca/logo-vertical.svg",
+  isotipo: "/marca/isotipo.svg",
+  mono: {
+    horizontal: "/marca/logo-horizontal-mono.svg",
+    vertical: "/marca/logo-vertical-mono.svg",
+    isotipo: "/marca/isotipo-mono.svg",
+  },
+  // Salen del `viewBox` de cada archivo. `next/image` exige `width` y
+  // `height` aunque luego los controle el CSS: son la PROPORCION, no el
+  // tamano final, y sin ellos el navegador no sabe cuanto hueco reservar y la
+  // pagina da un salto al cargar.
+  tam: {
+    horizontal: { w: 3132, h: 785 },
+    vertical: { w: 1289, h: 1255 },
+    isotipo: { w: 978, h: 785 },
+  },
 }
 
 /**

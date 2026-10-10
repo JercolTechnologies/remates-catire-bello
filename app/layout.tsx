@@ -6,7 +6,7 @@ import CabeceraCliente from "./components/CabeceraCliente";
 import NavegacionCliente from "./components/NavegacionCliente";
 import { RematesEnVivo } from "./components/RematesEnVivo";
 import { SesionCliente } from "./components/SesionCliente";
-import { pieDePagina } from "@/lib/marca";
+import { pieDePagina, tituloDocumento, PLATAFORMA } from "@/lib/marca";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,9 +18,31 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// EL TITULO SALE DE lib/marca.ts, NO DE AQUI.
+//
+// Estaba escrito a mano, y era el quinto sitio con el nombre clavado. Si hay
+// una casa licenciataria, `tituloDocumento()` la pone detras de la nuestra:
+// la plataforma manda (decision de Jota, 09/10).
+//
+// `metadataBase` hace falta para que la vista previa al compartir el enlace
+// apunte a una URL absoluta. Sin el, Next avisa en el build y las redes
+// sociales se quedan sin imagen. Sale de la variable que Vercel pone sola, con
+// respaldo a localhost para que `next dev` no se queje.
 export const metadata: Metadata = {
-  title: "Remate Catire Bello",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITIO ??
+      (process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+        : "http://localhost:3000")
+  ),
+  title: tituloDocumento(),
   description: "Remates hipicos en vivo: puja por un caballo y llevate el pozo si gana la carrera.",
+  openGraph: {
+    title: tituloDocumento(),
+    description: "Remates hipicos en vivo: puja por un caballo y llevate el pozo si gana la carrera.",
+    siteName: PLATAFORMA.nombre,
+    type: "website",
+  },
 };
 
 export default function RootLayout({

@@ -49,17 +49,79 @@ eso conserva los dorados oscuros sin arrastrar el fondo.
 El script que lo hizo es `herramientas/marca_sacar.py`. Si mañana llega un logo
 nuevo, se vuelve a correr y salen todas las piezas otra vez.
 
-## Lo que convendría pedirle al diseñador
+## Los vectoriales (10/10/2026)
 
-**El vectorial** (`.ai`, `.eps` o `.svg`). Con él:
+El diseñador no entregó vectoriales, así que se sacaron aquí, de los propios
+PNG. El script es `herramientas/marca_vectorizar.py` y se vuelve a correr
+entero si mañana llega un logo nuevo.
 
-- el logo se ve nítido a cualquier tamaño, también en pantallas retina y al
-  imprimir; lo que hay ahora son píxeles y a partir de cierto tamaño se notan;
-- se puede recolorear sin rehacerlo — hace falta el día que un licenciatario
-  quiera su propia marca, que es el modelo de negocio;
-- el `logo-horizontal.png` de aquí está **compuesto por nosotros**: el original
-  viene apilado, y la versión en línea se armó moviendo el texto al lado del
-  isotipo. Con el vectorial, esa versión la hace el diseñador y queda con su
-  espaciado, no con el nuestro.
+| Archivo | Peso | Para qué |
+|---|---|---|
+| `isotipo.svg` | 4,3 KB | el monograma, con el degradado de la paleta |
+| `isotipo-mono.svg` | 4,1 KB | lo mismo en `currentColor` |
+| `texto.svg` | 8,5 KB | REMATE + CATIRE BELLO |
+| `logo-vertical.svg` | 12,8 KB | el conjunto apilado, como el original |
+| `logo-horizontal.svg` | 12,8 KB | isotipo + texto en línea |
+| `logo-vertical-mono.svg` · `logo-horizontal-mono.svg` | 12,4 KB | en `currentColor` |
 
-Nada de esto bloquea el rediseño. Es para que no se descubra tarde.
+**El isotipo pasa de 1.008 KB a 4,3 KB**, y además se ve mejor a cualquier
+tamaño.
+
+### Por qué esto se pudo hacer
+
+El alfa de los PNG es prácticamente **binario** — medido: 52 % fuera, 47 %
+dentro, 0,9 % de borde. Los huecos internos (los espacios entre las crines, el
+ojo, el hueco de la C) ya están como **transparencia**, no como pintura oscura.
+Trazar el canal alfa devuelve la silueta completa **con** sus huecos, que es
+exactamente lo que es un logo plano.
+
+### Lo que estos SVG NO son
+
+**No son el vectorial del diseñador.** El original es un render 3D: biseles,
+reflejos especulares y destellos. Eso no se puede trazar — un autotrazado de un
+degradado metálico produce cientos de bandas planas, pesa megas y se ve peor.
+
+Lo que hay aquí es la marca **aplanada**: la misma forma, con un degradado
+dorado de la paleta medida. Para la interfaz es **mejor** que el PNG. Para una
+pieza grande donde el metal es el protagonista — la portada, un cartel — el PNG
+3D sigue siendo más rico, y por eso no se borra ninguno.
+
+### Las costuras
+
+Donde dos formas se solapan — la **B** contra la quijada del caballo, la **C**
+contra la crin — el original las separa con un bisel **dorado sobre dorado**, no
+con un hueco. Al aplanar, esas dos formas se funden en una mancha. El parámetro
+`--costuras` recorta por luminancia y recupera la separación. Medido sobre el
+isotipo: **por debajo de 70 no separa nada, 85 separa bien, a partir de 100
+empieza a comerse pedazos**. Los archivos de esta carpeta están a 85.
+
+### El hallazgo que parece al revés
+
+Mismo recorte del hocico, renderizado a 2400 px de ancho:
+
+| Parámetros | Peso | Bordes |
+|---|---|---|
+| escala ×2, 1 decimal | 44,3 KB | temblorosos |
+| escala ×2, 0 decimales | 29,4 KB | peor todavía |
+| **escala ×1, 0 decimales** | **4,2 KB** | **el más suave de los tres** |
+
+Al ampliar la máscara ×2 y desenfocarla, el borde gana ruido de píxel que
+potrace sigue fielmente. A escala 1 es el ajuste de curvas de potrace el que
+suaviza. Diez veces más pequeño **y** mejor.
+
+Esto solo se vio **comparando recortes ampliados**. El SVG de 44 KB era válido,
+tenía el número de contornos correcto y pesaba lo esperado: ninguna comprobación
+automática lo habría atrapado.
+
+### La versión mono no es un extra
+
+`fill="currentColor"` es lo que permite que la misma pieza sirva con el color de
+un licenciatario sin rehacer nada. Es el modelo de negocio metido en un
+atributo.
+
+### Lo que sigue conviniendo pedirle al diseñador
+
+El vectorial de verdad, para tener **el metal en vector** y para que la versión
+horizontal la componga él: la de aquí está **compuesta por nosotros** — el
+original viene apilado, y la línea se armó poniendo el texto al lado del
+isotipo al 74 % de su altura. No bloquea nada; es para que no se descubra tarde.

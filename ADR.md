@@ -1048,3 +1048,35 @@ Y antes de escribirla hay una decisión que no es técnica: las categorías hone
 **El reloj.** La antigüedad se calcula con el reloj del **navegador** contra `created_at`. Con la hora desajustada, el número miente. Es el mismo defecto ya anotado para la ventana del remate; para un indicador de cola es tolerable, para decidir dinero no se usaría.
 
 **Consecuencias.** 166 líneas de menú duplicado fuera. `tsc` limpio, `eslint` sin un solo problema en el archivo, `next build` verde. No hay prueba automática: es una pantalla de lectura, y lo que la valida es comparar sus cifras con `/admin/contabilidad`, que lee las mismas dos funciones.
+
+---
+
+## ADR-042 · La marca deja de estar escrita a mano, y pasa a ser vectorial
+
+**Fecha.** 10 de octubre de 2026 *(sin migración)*
+
+**Contexto.** El diseñador entregó **un JPG de 2048×2048** y nada más. De ahí salieron los PNG con transparencia (ADR de facto en `docs/MARCA.md`), pero la marca seguía **clavada a mano en cinco sitios**: dos rutas y dos `alt` en `BrandLogo.tsx`, el `title` del layout, el pie de página y el `h1` de la portada. `lib/marca.ts` existía desde el 09/10 pero **no lo usaba nadie**: era una costura preparada y sin coser.
+
+Eso no es comodidad, es el modelo de negocio: esta aplicación se alquila, y cada licenciatario quiere el nombre de su remate.
+
+**Decisión 1: los vectoriales se sacan aquí, de los propios PNG.** El procedimiento completo está en `docs/MARCA.md`; `herramientas/marca_vectorizar.py` lo repite entero si mañana llega un logo nuevo. Lo que lo hizo posible fue una medición: **el alfa de esos PNG es prácticamente binario** —52 % fuera, 47 % dentro, 0,9 % de borde—, así que los huecos internos ya estaban como transparencia y trazar el alfa devuelve la silueta completa **con** sus huecos. Con un alfa suave no habría salido.
+
+Siete archivos, **67 KB en total contra 3,3 MB de PNG**. El isotipo pasa de 1.008 KB a **4,3 KB**.
+
+**Y no son el vectorial del diseñador.** El original es un render 3D con biseles, reflejos y destellos; eso no se traza — un autotrazado de un degradado metálico da cientos de bandas planas, pesa megas y se ve peor. Esto es la marca **aplanada**. Para la interfaz es mejor que el PNG; para una pieza grande donde el metal es el protagonista, el PNG 3D sigue siendo más rico, y por eso no se borró ninguno de los dos que hacen falta.
+
+**Decisión 2: la versión `-mono` no es un extra.** `fill="currentColor"` es lo que permite que la misma pieza sirva con el color de un licenciatario sin rehacerla. Es el modelo de negocio metido en un atributo, y con un PNG era imposible.
+
+**No hubo que tocar `next.config.ts`, y se comprobó en la documentación antes de escribir nada.** Next 16: *«We recommend using the `unoptimized` prop when the `src` prop is known to be SVG. This happens automatically when `src` ends with `.svg`»*. Es decir, `next/image` con un `.svg` se salta el optimizador solo, así que **no hace falta `dangerouslyAllowSVG`** — que es la bandera que habría hecho falta si el SVG pasara por el optimizador, y que habría abierto la puerta a SVG remotos con scripts. La alternativa era `<img>`, que eslint marca.
+
+**Decisión 3: los iconos se mudan a `app/`.** `icon.png`, `apple-icon.png`, `favicon.ico` y `opengraph-image.png` estaban en `public/marca/` sin que nadie los sirviera. En `app/` son convención de Next y aparecen solos: el build pasó de 27 a **30 rutas**, y las tres nuevas son `/icon.png`, `/apple-icon.png` y `/opengraph-image.png`. Siguen siendo PNG a propósito: iOS no respeta el alfa y las redes sociales no renderizan SVG.
+
+**`metadataBase`, que no es decorativo.** Sin él la vista previa al compartir apunta a una ruta relativa y las redes se quedan sin imagen. Sale de la variable que Vercel pone sola, con respaldo a localhost para que `next dev` no avise.
+
+**Tres cosas que se arreglaron de paso, dichas para que no sorprendan en el diff.**
+
+1. **La portada decía «Remates Catire Bello», en plural.** La marca es «Remate Catire Bello», en singular — está así en el logo y en `lib/marca.ts`. Llevaba escrito a mano desde enero. Ahora ese `h1` sale de `PLATAFORMA.nombre` y es `sr-only`: el nombre ya está **dentro** del logo, y repetirlo debajo en texto era decirlo dos veces.
+2. **Los tres botones de la portada eran `<a>`, no `<Link>`.** eslint lo marcaba como error desde antes de hoy. Un `<a>` interno recarga la página entera, y con ella se pierde la suscripción de realtime que vive en el layout.
+3. **Se borraron `public/logo.png`, `public/logo-hero.png` y los cinco SVG de la plantilla de `create-next-app`** (`file.svg`, `globe.svg`, `next.svg`, `vercel.svg`, `window.svg`). Los dos primeros quedaron huérfanos al reescribir `BrandLogo`; los otros cinco nunca los usó nadie. `public/` queda con una sola carpeta: `marca/`.
+
+**Consecuencias.** `tsc` limpio, `eslint` **cero problemas** en los cuatro archivos tocados, `next build` verde con 30 rutas. No hay prueba automática: es marca, y lo que la valida es mirarla.
