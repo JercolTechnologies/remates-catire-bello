@@ -57,7 +57,7 @@ Si `$db` sale vacío, el contenedor no está arriba: `pnpm db:start` primero.
 
 ### `tests/pruebas_dinero.sql` — el arnés
 
-70 pruebas de reglas de dinero, permisos y contabilidad. Corre con **una sola conexión**. Al empezar baja los mínimos de `ajustes_instalacion` a **1/1** y `pct_apostado_para_retirar` a **0**, porque sus escenarios están escritos sobre un incremento de 10 y un par de pruebas usan números aún más bajos a propósito; el arnés no mide mínimos, los miden P54 y P55, que se los ponen ellas mismas. Al terminar los devuelve a 50/100/50, los de producción. Si cortas el arnés a medias, revisa esa tabla antes de abrir la aplicación contra la base local. Al terminar imprime la tabla de resultados y **limpia los datos que creó**, para que la base quede vacía si después vas a abrir la aplicación contra ella.
+72 pruebas de reglas de dinero, permisos y contabilidad. Corre con **una sola conexión**. Al empezar baja los mínimos de `ajustes_instalacion` a **1/1** y `pct_apostado_para_retirar` a **0**, porque sus escenarios están escritos sobre un incremento de 10 y un par de pruebas usan números aún más bajos a propósito; el arnés no mide mínimos, los miden P54 y P55, que se los ponen ellas mismas. Al terminar los devuelve a 50/100/50, los de producción. Si cortas el arnés a medias, revisa esa tabla antes de abrir la aplicación contra la base local. Al terminar imprime la tabla de resultados y **limpia los datos que creó**, para que la base quede vacía si después vas a abrir la aplicación contra ella.
 
 ### `tests/concurrencia.sql` — las carreras
 
@@ -86,7 +86,7 @@ La prueba 0 comprueba además que la **segunda conexión** se pudo abrir, y en e
 
 **No se usa `psql` suelto** (no está instalado en Windows) ni `npx supabase db query` (no devuelve la tabla de resultados del arnés). El `psql` que corre es el que vive dentro del contenedor.
 
-**Marcador esperado al 08/10/2026: 70 en verde, 0 en rojo, de 70** en el arnés, y **4 de 4** en concurrencia. Cualquier otro número significa que algo cambió — no lo des por bueno sin leer el detalle de la fila en rojo, que dice exactamente qué midió y con qué valores.
+**Marcador esperado al 10/10/2026: 72 en verde, 0 en rojo, de 72** en el arnés, y **4 de 4** en concurrencia. Cualquier otro número significa que algo cambió — no lo des por bueno sin leer el detalle de la fila en rojo, que dice exactamente qué midió y con qué valores.
 
 > **Y léelo ENTERO, no el principio.** El 07/10 P47 salió en rojo y se dio por el falso
 > conocido de `pgcrypto`. No lo era: el detalle decía `sin declarar: 1` y nombraba una

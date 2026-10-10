@@ -5841,6 +5841,298 @@ begin
 end $$;
 
 
+
+-- ============================================================================
+--  P71 - Dos caballos pueden intercambiar su numero
+--
+--  EL DEFECTO QUE EXISTE PARA IMPEDIR. Pasar el caballo 3 a 5 cuando la
+--  carrera ya tenia un 5 rebotaba con 23505 en el PRIMER update, antes de que
+--  el 5 llegara a ser 3, y el admin lo veia en crudo.
+--
+--  Y hay que decir por que la transaccion del 08/10 no lo arreglo, porque es
+--  el punto entero de esta prueba: `guardar_remate_completo` YA era atomica
+--  -- P70 lo demuestra -- y aun asi esto fallaba. Una transaccion decide que
+--  se guarda TODO o NADA; no decide CUANDO se comprueban las reglas. El indice
+--  comprobaba fila a fila un estado que durante un intercambio es falso a
+--  mitad de camino.
+--
+--  LO QUE MIDE
+--   1. la restriccion es DIFERIBLE pero NO diferida por defecto
+--   2. el intercambio 1 <-> 2 funciona y deja los dos numeros cambiados
+--   3. un duplicado DE VERDAD (dos caballos acabando en el mismo numero)
+--      sigue rechazandose, con mensaje traducido y SIN dejar nada a medias:
+--      foto identica de los caballos antes y despues
+--   4. un alta con numero repetido sigue rebotando AL MOMENTO, no al final:
+--      el `initially immediate` no se perdio
+--
+--  REGLA DEL 28/09: se comprueba CUAL excepcion. Un 42883 significaria que la
+--  migracion no esta aplicada y la prueba no estaria probando nada.
+-- ============================================================================
+do $$
+declare
+  v_admin uuid;
+  v_difiere_ok boolean := false;
+  v_swap_ok boolean := false;
+  v_dup_ok boolean := false;
+  v_alta_ok boolean := false;
+
+  v_condef boolean; v_condeferred boolean;
+  v_rem uuid; v_race uuid; v_c1 uuid; v_c2 uuid;
+  v_carrera jsonb; v_remate jsonb;
+  v_foto_antes text; v_foto_despues text; v_foto_swap text;
+  v_sql_dup text; v_msg_dup text; v_sql_alta text; v_msg_alta text;
+begin
+  perform _p.limpiar();
+  delete from public.admin_actions;
+
+  select c.condeferrable, c.condeferred into v_condef, v_condeferred
+  from pg_constraint c
+  join pg_class t on t.oid = c.conrelid
+  join pg_namespace n on n.oid = t.relnamespace
+  where n.nspname = 'public' and t.relname = 'horses'
+    and c.conname = 'horses_race_id_numero_key';
+
+  if v_condef is null then
+    perform _p.anotar(71, 'Dos caballos pueden intercambiar su numero',
+      'la unica (race_id, numero) es diferible y el intercambio funciona',
+      false, 'horses_race_id_numero_key NO EXISTE: la migracion 20261010140000 no esta aplicada');
+    return;
+  end if;
+
+  -- 1) diferible, pero inmediata por defecto. Las dos cosas importan: si fuera
+  --    `initially deferred`, CUALQUIER escritura de la base se enteraria de un
+  --    numero repetido solo al confirmar, incluida una que no intercambia nada.
+  v_difiere_ok := v_condef and not v_condeferred;
+
+  -- Esta prueba fija SUS propias precondiciones. `minimo_incremento` lo dejan
+  -- en 1 otras pruebas, y P67 se llevo un susto por fiarse (lección del 07/10).
+  update public.ajustes_instalacion set valor = '50'  where clave = 'minimo_incremento';
+  update public.ajustes_instalacion set valor = '100' where clave = 'minimo_precio_salida';
+
+  v_admin := _p.usuario('jefa', 0, true);
+  perform _p.actuar_como(v_admin);
+
+  select c.id_carrera, c.id_remate into v_race, v_rem
+  from public.crear_remate_completo(
+    jsonb_build_object('nombre','Carrera','hipodromo','La Rinconada',
+                       'fecha',current_date::text,'dia','Sabado','distancia_m',1600),
+    jsonb_build_object('nombre','R','incremento_minimo',50,'porcentaje_casa',25),
+    jsonb_build_array(
+      jsonb_build_object('numero',1,'nombre','Uno','jinete','A','precio_salida',100),
+      jsonb_build_object('numero',2,'nombre','Dos','jinete','B','precio_salida',100)
+    )) c;
+
+  select h.id into v_c1 from public.horses h where h.race_id = v_race and h.numero = 1;
+  select h.id into v_c2 from public.horses h where h.race_id = v_race and h.numero = 2;
+
+  v_carrera := jsonb_build_object('nombre','Carrera','hipodromo','La Rinconada',
+                 'fecha',current_date::text,'dia','Sabado','distancia_m',1600);
+  v_remate  := jsonb_build_object('porcentaje_casa',25,'incremento_minimo',50,'tipo','vivo');
+
+  -- 2) EL INTERCAMBIO. El 1 pasa a 2 y el 2 pasa a 1, en la misma llamada.
+  perform public.guardar_remate_completo(
+    v_rem, v_carrera, v_remate,
+    jsonb_build_array(
+      jsonb_build_object('id',v_c1,'numero',2,'nombre','Uno','jinete','A','precio_salida',100),
+      jsonb_build_object('id',v_c2,'numero',1,'nombre','Dos','jinete','B','precio_salida',100)
+    ), '[]'::jsonb);
+
+  select string_agg(h.numero || '=' || h.nombre, ', ' order by h.numero)
+    into v_foto_swap
+  from public.horses h where h.race_id = v_race;
+
+  -- Se comprueba por el ID, no por el numero: lo que interesa es que CADA
+  -- caballo acabo con el numero del otro, no que existan un 1 y un 2.
+  v_swap_ok :=
+        (select h.numero from public.horses h where h.id = v_c1) = 2
+    and (select h.numero from public.horses h where h.id = v_c2) = 1;
+
+  -- 3) UN DUPLICADO DE VERDAD SIGUE SIENDO UN DUPLICADO.
+  select string_agg(h.id::text || ':' || h.numero, ', ' order by h.numero)
+    into v_foto_antes
+  from public.horses h where h.race_id = v_race;
+
+  begin
+    perform public.guardar_remate_completo(
+      v_rem, v_carrera, v_remate,
+      jsonb_build_array(
+        jsonb_build_object('id',v_c1,'numero',4,'nombre','Uno','jinete','A','precio_salida',100),
+        jsonb_build_object('id',v_c2,'numero',4,'nombre','Dos','jinete','B','precio_salida',100)
+      ), '[]'::jsonb);
+  exception when others then
+    v_sql_dup := sqlstate;
+    v_msg_dup := sqlerrm;
+  end;
+
+  select string_agg(h.id::text || ':' || h.numero, ', ' order by h.numero)
+    into v_foto_despues
+  from public.horses h where h.race_id = v_race;
+
+  -- La foto identica es la prueba de atomicidad: el primer update SI llego a
+  -- ejecutarse (por eso hacia falta diferir), y aun asi no quedo nada.
+  v_dup_ok := v_sql_dup = '23505'
+    and v_msg_dup like '%numero distinto%'
+    and v_foto_antes = v_foto_despues;
+
+  -- 4) EL `INITIALLY IMMEDIATE` NO SE PERDIO. Crear con dos numeros iguales
+  --    sigue rebotando al momento y con el mensaje de ADR-036.
+  begin
+    perform public.crear_remate_completo(
+      jsonb_build_object('nombre','Otra','fecha',current_date::text),
+      jsonb_build_object('nombre','R2','incremento_minimo',50,'porcentaje_casa',25),
+      jsonb_build_array(
+        jsonb_build_object('numero',5,'nombre','A','precio_salida',100),
+        jsonb_build_object('numero',5,'nombre','B','precio_salida',100)
+      ));
+  exception when others then
+    v_sql_alta := sqlstate;
+    v_msg_alta := sqlerrm;
+  end;
+  v_alta_ok := v_sql_alta is not null and v_msg_alta like '%repetido%';
+
+  perform _p.anotar(71, 'Dos caballos pueden intercambiar su numero',
+    'la unica es diferible pero inmediata por defecto; el intercambio funciona; un duplicado de verdad rebota sin dejar nada a medias; un alta repetida sigue rebotando al momento',
+    v_difiere_ok and v_swap_ok and v_dup_ok and v_alta_ok,
+    format('diferible=%s (condeferrable=%s condeferred=%s) | INTERCAMBIO=%s (%s) | duplicado=%s (%s: %s) | alta_repetida=%s (%s) | foto antes: %s | foto despues: %s',
+      v_difiere_ok, v_condef, v_condeferred,
+      v_swap_ok, coalesce(v_foto_swap,'-'),
+      v_dup_ok, coalesce(v_sql_dup,'sin excepcion'), coalesce(left(v_msg_dup,60),'-'),
+      v_alta_ok, coalesce(left(v_msg_alta,60),'sin excepcion'),
+      coalesce(v_foto_antes,'-'), coalesce(v_foto_despues,'-')));
+end $$;
+
+
+-- ============================================================================
+--  P72 - La misma clave no crea dos remates
+--
+--  EL DEFECTO QUE EXISTE PARA IMPEDIR. Jota: "al crearse un remate, el boton
+--  de crear remate queda activo y si le doy 20 veces mas, crea 20 remates con
+--  el mismo nombre y los mismos datos".
+--
+--  Y otra vez: la transaccion del 07/10 NO cubria esto. Dos clics son dos
+--  llamadas COMPLETAS Y CORRECTAS; no hay nada a medias que deshacer. La base
+--  creaba dos remates porque no tenia forma de saber que era el mismo.
+--
+--  LO QUE MIDE
+--   1. la columna y su indice unico PARCIAL existen
+--   2. dos envios con LA MISMA clave devuelven el mismo remate, y solo hay uno
+--   3. el segundo envio devuelve los contadores DE VERDAD, no ceros: para el
+--      formulario tiene que ser indistinguible de haber acertado a la primera
+--   4. el segundo envio NO duplica los caballos
+--   5. el segundo envio NO deja un segundo asiento (ADR-038: la bitacora no
+--      anuncia lo que no paso)
+--   6. dos claves DISTINTAS crean dos remates -- la guarda no se pasa de lista
+--   7. sin clave sigue creando siempre, que es como se comporto hasta hoy y
+--      como se comporta el frontend viejo durante el despliegue
+-- ============================================================================
+do $$
+declare
+  v_admin uuid;
+  v_col_ok boolean := false;
+  v_misma_ok boolean := false;
+  v_contadores_ok boolean := false;
+  v_caballos_ok boolean := false;
+  v_asiento_ok boolean := false;
+  v_distintas_ok boolean := false;
+  v_sin_clave_ok boolean := false;
+
+  v_hay_col boolean; v_hay_idx boolean;
+  v_r1 uuid; v_r2 uuid; v_r3 uuid; v_r4 uuid; v_r5 uuid;
+  v_carrera jsonb; v_remate jsonb; v_caballos jsonb;
+  v_n1 int; v_n2 int; v_q1 int; v_q2 int;
+  v_cuantos int; v_asientos int; v_caballos_de int;
+begin
+  perform _p.limpiar();
+  delete from public.admin_actions;
+
+  select exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='remates' and column_name='clave_creacion'
+  ) into v_hay_col;
+
+  select exists (
+    select 1 from pg_indexes
+    where schemaname='public' and tablename='remates' and indexname='remates_clave_creacion_key'
+  ) into v_hay_idx;
+
+  if not v_hay_col then
+    perform _p.anotar(72, 'La misma clave no crea dos remates',
+      'dos envios con la misma clave devuelven el mismo remate',
+      false, 'remates.clave_creacion NO EXISTE: la migracion 20261010150000 no esta aplicada');
+    return;
+  end if;
+  v_col_ok := v_hay_col and v_hay_idx;
+
+  update public.ajustes_instalacion set valor = '50'  where clave = 'minimo_incremento';
+  update public.ajustes_instalacion set valor = '100' where clave = 'minimo_precio_salida';
+
+  v_admin := _p.usuario('jefa', 0, true);
+  perform _p.actuar_como(v_admin);
+
+  v_carrera := jsonb_build_object('nombre','Carrera','hipodromo','La Rinconada',
+                 'fecha',current_date::text,'dia','Sabado','distancia_m',1600);
+  v_remate  := jsonb_build_object('nombre','R','incremento_minimo',50,'porcentaje_casa',25);
+  v_caballos := jsonb_build_array(
+      jsonb_build_object('numero',1,'nombre','Uno','precio_salida',100,
+        'reglas', jsonb_build_array(jsonb_build_object('min_precio',100,'max_precio',null,'incremento',75))),
+      jsonb_build_object('numero',2,'nombre','Dos','precio_salida',100));
+
+  delete from public.admin_actions;
+
+  -- 2 y 3) EL DOBLE CLIC
+  select c.id_remate, c.n_caballos, c.n_reglas into v_r1, v_n1, v_q1
+  from public.crear_remate_completo(v_carrera, v_remate, v_caballos, 'clave-del-doble-clic') c;
+
+  select c.id_remate, c.n_caballos, c.n_reglas into v_r2, v_n2, v_q2
+  from public.crear_remate_completo(v_carrera, v_remate, v_caballos, 'clave-del-doble-clic') c;
+
+  select count(*)::int into v_cuantos
+  from public.remates r where r.clave_creacion = 'clave-del-doble-clic';
+
+  v_misma_ok := v_r1 = v_r2 and v_cuantos = 1;
+
+  -- Los contadores del segundo envio salen de contar las filas de verdad, no
+  -- de recordar lo que devolvio el primero.
+  v_contadores_ok := v_n1 = 2 and v_n2 = 2 and v_q1 = 1 and v_q2 = 1;
+
+  -- 4) sin caballos duplicados
+  select count(*)::int into v_caballos_de
+  from public.horses h
+  join public.remates r on r.race_id = h.race_id
+  where r.id = v_r1;
+  v_caballos_ok := v_caballos_de = 2;
+
+  -- 5) UN asiento, no dos
+  select count(*)::int into v_asientos
+  from public.admin_actions a
+  where a.action = 'crear_remate_completo' and a.target_id = v_r1::text;
+  v_asiento_ok := v_asientos = 1;
+
+  -- 6) dos claves distintas son dos remates
+  select c.id_remate into v_r3
+  from public.crear_remate_completo(v_carrera, v_remate, v_caballos, 'otra-clave') c;
+  v_distintas_ok := v_r3 is not null and v_r3 <> v_r1;
+
+  -- 7) SIN CLAVE, como hasta hoy. Es el camino que sigue usando el frontend
+  --    desplegado entre el paso de base y el de codigo.
+  select c.id_remate into v_r4 from public.crear_remate_completo(v_carrera, v_remate, v_caballos) c;
+  select c.id_remate into v_r5 from public.crear_remate_completo(v_carrera, v_remate, v_caballos) c;
+  v_sin_clave_ok := v_r4 is not null and v_r5 is not null and v_r4 <> v_r5;
+
+  perform _p.anotar(72, 'La misma clave no crea dos remates',
+    'dos envios con la misma clave devuelven el mismo remate con sus contadores de verdad, sin duplicar caballos ni asientos; dos claves distintas crean dos; sin clave sigue creando siempre',
+    v_col_ok and v_misma_ok and v_contadores_ok and v_caballos_ok
+      and v_asiento_ok and v_distintas_ok and v_sin_clave_ok,
+    format('columna+indice=%s | DOBLE CLIC=%s (remates con esa clave=%s, mismo id=%s) | contadores=%s (1o: %s caballos %s reglas | 2o: %s caballos %s reglas) | caballos=%s (%s) | asientos=%s (%s) | claves_distintas=%s | sin_clave=%s',
+      v_col_ok,
+      v_misma_ok, v_cuantos, (v_r1 = v_r2),
+      v_contadores_ok, v_n1, v_q1, v_n2, v_q2,
+      v_caballos_ok, v_caballos_de,
+      v_asiento_ok, v_asientos,
+      v_distintas_ok, v_sin_clave_ok));
+end $$;
+
+
 -- ---------------------------------------------------------------- resumen
 \set QUIET off
 select n as "#", nombre, esperado, estado, detalle from _p.resultado order by n;

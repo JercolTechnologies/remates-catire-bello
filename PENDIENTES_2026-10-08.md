@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (42 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (44 decisiones) y en el arnés.
 
-**Estado del proyecto:** 70/70 en `tests/pruebas_dinero.sql`, 4/4 en
+**Estado del proyecto:** 72/72 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 42 migraciones, 42 ADRs.
+31 en `tests/aviso_puja.mjs`. 44 migraciones, 44 ADRs.
 
 ---
 
@@ -32,24 +32,14 @@ detalla aquí: está en `ADR.md` (42 decisiones) y en el arnés.
 | **Vectoriales de la marca**, sacados de los PNG: 7 SVG, versión mono recoloreable | `docs/MARCA.md`, `marca_vectorizar.py` |
 | **La marca, cableada**: `lib/marca.ts` deja de ser una costura sin coser; SVG en toda la interfaz | ADR-042 |
 | Los iconos se mudan a `app/`: favicon, icono de iOS y vista previa al compartir | ADR-042 |
+| **Los números de dos caballos ya se pueden intercambiar**: la única pasa a diferible | ADR-043, `20261010140000`, P71 → **cierra el 1.1** |
+| **El doble clic ya no crea dos remates**: clave de idempotencia con índice único detrás | ADR-044, `20261010150000`, P72 → **cierra el 1.2** |
 
 ---
 
 ## 1 · Lo que yo haría primero
 
-### 1.1 · No se pueden intercambiar los números de dos caballos
-Medido el 07/10: `horses_race_id_numero_key` **no es diferible**, así que cambiar el
-caballo 3 a 5 cuando ya existe un 5 rebota con `23505` en el primer UPDATE. El admin
-recibe un `duplicate key` en crudo. Una transacción sola no lo arregla: hace falta
-hacerlo en dos pasos (a números temporales y luego a los definitivos) o declarar la
-restricción `deferrable initially deferred`.
-
-### 1.2 · Clave de idempotencia al crear un remate
-Un doble clic sigue creando dos remates. La transacción arregló el fallo **a mitad**,
-no el doble clic: dos clics son dos llamadas completas y correctas. Las dos guardas del
-formulario son la única defensa y son del navegador.
-
-### 1.3 · `guardar_soporte` — la última tabla del panel que se escribe directo
+### 1.1 · `guardar_soporte` — la última tabla del panel que se escribe directo
 `support_settings` sigue con `insert`, `update` y `delete` para `authenticated`, y
 `/admin/super/soporte` la escribe con un `delete` de los que sobran más un `insert` y
 un `update` por fila: el mismo patrón que ya corregimos dos veces. Es la única tabla
@@ -59,7 +49,7 @@ Estuvo agrupada con las tres del catálogo del remate hasta el 08/10 por un erro
 la nota de P48; no tiene nada que ver con `crear_remate_completo` ni con
 `guardar_remate_completo`.
 
-### 1.4 · Cerrar `remates.insert`
+### 1.2 · Cerrar `remates.insert`
 El `GRANT` sigue puesto aunque ya nadie lo use: desde el ADR-036 crear un remate pasa
 por la RPC. P36 lo documenta pero no lo comprueba, a propósito, para no ponerse roja
 por algo que decidimos dejar así. Es una línea de migración y apretar P36.

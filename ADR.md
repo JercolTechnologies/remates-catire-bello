@@ -1080,3 +1080,59 @@ Siete archivos, **67 KB en total contra 3,3 MB de PNG**. El isotipo pasa de 1.00
 3. **Se borraron `public/logo.png`, `public/logo-hero.png` y los cinco SVG de la plantilla de `create-next-app`** (`file.svg`, `globe.svg`, `next.svg`, `vercel.svg`, `window.svg`). Los dos primeros quedaron huérfanos al reescribir `BrandLogo`; los otros cinco nunca los usó nadie. `public/` queda con una sola carpeta: `marca/`.
 
 **Consecuencias.** `tsc` limpio, `eslint` **cero problemas** en los cuatro archivos tocados, `next build` verde con 30 rutas. No hay prueba automática: es marca, y lo que la valida es mirarla.
+
+---
+
+## ADR-043 · Una transacción decide QUÉ se guarda, no CUÁNDO se comprueban las reglas
+
+**Fecha.** 10 de octubre de 2026 *(migración `20261010140000`)*
+
+**Contexto.** Pendiente 1.1, medido el 07/10 y arrastrado tres días. No se podían **intercambiar** los números de dos caballos: pasar el 3 a 5 cuando la carrera ya tenía un 5 rebotaba con `23505 duplicate key value violates unique constraint "horses_race_id_numero_key"` en el **primer** `UPDATE`, antes de que el 5 llegara a ser 3. Y el admin lo veía en crudo.
+
+**Y aquí está lo que importa entender, porque es fácil creer lo contrario.** `guardar_remate_completo` **ya era atómica** desde el 08/10 (ADR-039), y P70 lo demuestra con una foto idéntica de los caballos antes y después de un fallo. Aun así esto fallaba. El defecto no era de atomicidad: era que el **índice comprueba fila a fila** un estado —«no hay dos caballos con el mismo número»— que durante un intercambio es **falso a mitad de camino** y solo vuelve a ser cierto cuando el bucle termina.
+
+> Una transacción decide que se guarda **todo o nada**. No decide **cuándo** se comprueban las reglas.
+
+**Decisión: la restricción pasa a `DEFERRABLE INITIALLY IMMEDIATE`, y el diferimiento se pide a mano donde hace falta.** La alternativa era renumerar en dos pasadas —primero a números temporales que no choquen, luego a los definitivos—, que funciona, duplica los `UPDATE` y mete en la función una regla sobre qué números son «seguros» que habría que mantener para siempre. El diferimiento existe exactamente para esto.
+
+**`INITIALLY IMMEDIATE` y no `INITIALLY DEFERRED`**, que es la decisión fina. Diferir por defecto en toda la base significa que **cualquier** escritura con números repetidos no se entera hasta el `COMMIT`, incluida una que no intercambia nada. Así, un `insert` suelto sigue rebotando al momento —P71 lo comprueba— y la única línea que difiere es la que está dentro de `guardar_remate_completo`.
+
+**Se comprueba dentro de la función, no al confirmar.** `set constraints ... immediate` fuerza la comprobación ahí mismo; la documentación de PostgreSQL lo dice literal: *«any outstanding data modifications that would have been checked at the end of the transaction are instead checked during the execution of the SET CONSTRAINTS command»*. Hace falta que falle **ahí dentro**: si la comprobación se quedara para el commit, el `23505` saldría fuera de la función y el admin volvería a ver el `duplicate key` en crudo. El bloque lo traduce. Quien rechaza sigue siendo el índice; esto es presentación del error (mismo criterio que ADR-036).
+
+**Hay `DROP` porque no hay otra forma, y se comprobó antes de escribir.** `ALTER TABLE ... ALTER CONSTRAINT` solo sirve para claves foráneas: *«Currently only foreign key constraints may be altered»*. Y al tirarla no se rompe nada: ninguna clave foránea apunta a `(race_id, numero)` —las tres sobre `horses` apuntan a `horses(id)`—, y **no hay ni un `on conflict` sobre `horses`** en todo el repositorio, que es el uso que un índice diferible no admite.
+
+**La mecánica se probó aislada antes de tocar la migración**, sobre un Postgres 16 limpio y con el mismo patrón: el intercambio pasa, el duplicado de verdad da `23505` con el mensaje traducido **y las filas no se mueven**, y un `insert` suelto repetido sigue rebotando al momento.
+
+**Consecuencias.** `P71`, cuatro condiciones. La que da la medida es la foto idéntica tras el duplicado: el primer `UPDATE` **sí** llegó a ejecutarse —por eso hacía falta diferir— y aun así no quedó nada.
+
+---
+
+## ADR-044 · Dos clics son dos peticiones correctas, y por eso la transacción no bastaba
+
+**Fecha.** 10 de octubre de 2026 *(migración `20261010150000`)*
+
+**Contexto.** Pendiente 1.2, abierto desde el 07/10. Jota: *«al crearse un remate, el botón de crear remate queda activo y si le doy 20 veces más, crea 20 remates con el mismo nombre y los mismos datos»*.
+
+**Por qué la transacción del 07/10 no lo cubrió**, que es el mismo malentendido que ADR-043 por el otro lado:
+
+> Dos clics son dos llamadas **completas y correctas**. No hay nada a medias que deshacer.
+
+`crear_remate_completo` hacía su trabajo bien las dos veces. La base creaba dos remates porque **no tenía forma de saber que era el mismo**. Una transacción decide si una petición se guarda entera; no decide si dos peticiones son la misma petición.
+
+Las dos guardas que había (`if (saving) return` y `if (createdRemateId)`) son **del navegador**. Protegen del doble clic rápido en la misma pestaña y de nada más: recargar y reenviar las salta, dos pestañas las saltan, y una respuesta que tarda con un admin que insiste las salta.
+
+**Decisión: una clave que pone quien pide.** El formulario genera una clave en el primer envío y la repite en **cada reintento**. Dos envíos con la misma clave son, por definición, el mismo remate —y eso la base sí lo puede afirmar, porque es un dato y no una suposición. La clave identifica el **intento**, no la pulsación.
+
+**El segundo envío no crea nada y no falla: devuelve el remate del primero**, con la misma forma de respuesta y con los contadores reales —contados de las filas, no recordados. Para el formulario es indistinguible de haber acertado a la primera, que es justo lo que se quiere: un admin que hizo doble clic no tiene por qué ver un error.
+
+**El candado va antes de mirar, no después.** Sin él, dos clics casi simultáneos entran los dos en el `select`, los dos no encuentran nada y los dos intentan insertar: uno gana y el otro se come un `23505` del índice único —correcto en cuanto a datos, feo en cuanto a mensaje. Con `pg_advisory_xact_lock` sobre la clave, el segundo espera y cuando mira ya encuentra el remate del primero. El índice único sigue siendo la garantía de fondo.
+
+**No se repite la bitácora.** El segundo envío no creó nada, así que no hay nada que registrar: anotarlo sería el defecto que cerró ADR-038, una bitácora anunciando lo que no pasó. P72 lo comprueba contando asientos.
+
+**Una columna, no una tabla aparte.** La clave es un atributo del remate —con quién lo creó y cuándo. Una tabla de claves sería un sitio más que limpiar, una unión más que hacer, y dejaría la puerta a que exista una clave sin remate. El índice es **parcial** (`where clave_creacion is not null`), así que los remates anteriores a hoy quedan fuera en vez de ocupar una entrada nula cada uno.
+
+**`p_clave` tiene valor por omisión, y eso es por el despliegue.** El orden es **base primero, código después**. Entre los dos pasos, el frontend desplegado llama con tres argumentos: con el valor por omisión esa llamada sigue siendo válida y se comporta como hoy. Sin él, cada remate creado entre un paso y el otro habría fallado. P72 lo comprueba explícitamente.
+
+**Hay `DROP` de la firma vieja.** `create or replace` no puede añadir un parámetro: crearía una función **nueva** y dejaría la de tres argumentos viva. Dos sobrecargas con el mismo nombre dejan a PostgREST eligiendo, y no para la función que crea remates.
+
+**Consecuencias.** `P72`, siete condiciones, incluida la que cierra el bucle: sin clave sigue creando siempre, que es como se comportó hasta hoy y como se comporta el frontend viejo durante el despliegue.

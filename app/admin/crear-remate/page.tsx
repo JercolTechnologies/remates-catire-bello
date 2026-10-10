@@ -2,7 +2,7 @@
 
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { Dispatch, SetStateAction } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -104,6 +104,17 @@ export default function AdminCrearRematePage() {
   // =========================
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+
+  // LA CLAVE DE IDEMPOTENCIA (10/10/2026, pendiente 1.2).
+  //
+  // Identifica el INTENTO, no la pulsacion. Se genera en el primer envio y se
+  // repite en todos los reintentos del mismo intento, asi que dos clics
+  // mandan la misma clave y la base devuelve el mismo remate en vez de crear
+  // dos. Ver 20261010150000_idempotencia_crear_remate.sql y P72.
+  //
+  // Va en una referencia y no en estado a proposito: cambiarla no tiene que
+  // repintar nada, y en estado provocaria un render por cada envio.
+  const claveCreacion = useRef<string>("")
   const [error, setError] = useState("")
   const [ok, setOk] = useState("")
 
@@ -607,21 +618,24 @@ export default function AdminCrearRematePage() {
   // dentro y 20261007130000_crear_remate_completo.sql.
   // =========================
   async function onCreate() {
-    // EL DOBLE CLIC SIGUE SIENDO COSA DEL CLIENTE, Y HAY QUE SABERLO.
+    // EL DOBLE CLIC, CERRADO EN LA BASE DESDE EL 10/10.
     //
     // Jota lo encontro asi: "al crearse un remate, el boton de crear remate
     // queda activo y si le doy 20 veces mas, crea 20 remates con el mismo
     // nombre y los mismos datos".
     //
-    // La transaccion arregla el fallo A MITAD, no el doble clic: dos clics son
-    // dos llamadas completas y correctas, y la base crea dos remates porque no
-    // tiene forma de saber que es el mismo. Estas dos guardas siguen siendo la
-    // unica defensa, y son del navegador: si el admin recarga y reenvia, pasa
-    // igual.
+    // La transaccion del 07/10 NO arreglaba esto, y conviene tenerlo claro:
+    // dos clics son dos llamadas COMPLETAS Y CORRECTAS, no hay nada a medias
+    // que deshacer. La base creaba dos remates porque no tenia forma de saber
+    // que era el mismo.
     //
-    // Lo que falta para cerrarlo de verdad es una clave de idempotencia que
-    // viaje en el payload con un indice unico detras. Queda apuntado, no
-    // hecho: el 07/10 se decidio que esta migracion fuera UNA sola cosa.
+    // Ahora el payload lleva `p_clave` y la base tiene un indice unico detras:
+    // el segundo envio devuelve el remate del primero en vez de crear otro, y
+    // sin error -- un admin que hizo doble clic no tiene por que ver uno.
+    //
+    // Estas dos guardas SE QUEDAN, y no son redundantes: ahorran la ida y
+    // vuelta al servidor. Lo que ya no son es la unica defensa, que es lo que
+    // las hacia fragiles -- recargar y reenviar las saltaba.
     if (saving) return
     if (createdRemateId) {
       setError("Este remate ya se creó. Recarga la página si quieres crear otro.")
@@ -647,6 +661,22 @@ export default function AdminCrearRematePage() {
       // 0) Verificar admin antes de escribir
       const aid = await ensureAdmin()
       if (!aid) return
+
+      // La clave se genera UNA vez por intento. Si este envio falla por lo que
+      // sea -- la red, una validacion de la base -- el siguiente reintento
+      // manda la misma, y si resulta que el primero si llego a escribir, la
+      // base devuelve ese remate en vez de crear un gemelo.
+      //
+      // `crypto.randomUUID` solo existe en contexto seguro (https o
+      // localhost). El panel siempre lo es, pero un respaldo de tres lineas
+      // quita una clase entera de fallo, y una clave "peor" sigue cumpliendo
+      // su trabajo: solo tiene que no repetirse.
+      if (!claveCreacion.current) {
+        claveCreacion.current =
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+      }
 
       // UNA SOLA LLAMADA. (07/10/2026, pendiente 1.1)
       //
@@ -731,6 +761,7 @@ export default function AdminCrearRematePage() {
           closes_at: buildCaracasTs(closesDateISO, closesTime24),
         },
         p_caballos: caballosPayload,
+        p_clave: claveCreacion.current,
       })
 
       if (rpcErr) throw new Error(rpcErr.message)
