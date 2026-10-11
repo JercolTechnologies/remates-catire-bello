@@ -1238,3 +1238,33 @@ No es un defecto cosmético: es la pantalla que le dice a una persona dónde pon
 **Y `/dashboard/recargar` dice la verdad cuando no hay datos.** Antes se los inventaba — los de otra casa. Ahora, si falta el titular, el documento o un método completo, enseña una franja ámbar y **esconde el formulario**: un «ya pagué» sin sitio donde pagar solo produce solicitudes que nadie puede aprobar, y una discusión después. Medio método tampoco cuenta: un banco sin número de cuenta no es un sitio donde poner dinero.
 
 **Lo que NO cierra.** `CASA` en `lib/marca.ts` sigue siendo una constante. La clave `casa_nombre` ya existe y la pantalla ya la guarda, pero leerla toca `metadata` del layout, que es servidor, y es un cambio de otra naturaleza. Queda en PENDIENTES.
+
+---
+
+## ADR-048 · Un descargo que no se puede probar no es un descargo
+
+**Fecha.** 11 de octubre de 2026 *(migración `20261011023500`)*
+
+**Contexto.** La casa es del licenciatario y el dinero lo mueve él. Pero la marca que ve el jugador es la de la plataforma — decisión de Jota del 09/10, franquicia —, así que **el jugador que pierda dinero le escribe a la plataforma**. La respuesta a esa reclamación es un descargo. Y un descargo solo sirve si se puede demostrar que esa persona lo aceptó.
+
+Jota planteó el mecanismo como una pantalla: que la casilla no se active hasta que el scroll llegue al final. Eso es bueno y se hará, pero **no es lo que protege**. En un *clickwrap* los tribunales miran aviso, acto afirmativo, oportunidad real de leer — y la prueba, cuya carga es de quien la invoca. El scroll refuerza el tercero. La prueba es el cuarto, y la aplicación no guardaba nada.
+
+**Decisión: documentos versionados e inmutables, con registro de aceptación.**
+
+**Una versión publicada no se edita jamás.** `publicar_documento()` siempre inserta `max(version)+1`; no hay camino para editar una publicada, ni para el super admin. Si se pudiera, editar el texto cambiaría **hacia atrás** lo que aceptó cada persona, y dejaría sin valor todos los consentimientos anteriores. No es una buena práctica: es la propiedad que hace que el registro signifique algo.
+
+**La versión la pone la base, no el navegador.** El cliente dice *qué* documentos acepta; el número lo resuelve la base contra lo publicado en ese instante. Un cliente manipulado no puede afirmar haber aceptado una versión vieja ni inventada.
+
+**El consentimiento y el alta, en la misma transacción.** Lo escribe `handle_new_user()`, el trigger que ya crea el perfil y la cartera. Una llamada aparte después del registro dejaría una ventana con usuarios sin consentimiento — y con la confirmación de correo activada **no hay sesión** para hacer esa llamada.
+
+**Y si el navegador no manda nada, el alta NO revienta.** Con un repositorio sirviendo a N casas, el desfase entre desplegar la base y desplegar la pantalla existe. Hacer fallar el registro ahí dejaría a una casa entera sin poder dar de alta a nadie por un problema de orden de despliegue. La persona queda con el documento pendiente y la aplicación se lo pedirá.
+
+**`anon` lee los textos, y es deliberado.** Los términos se leen **antes** de abrir la cuenta. Exigir sesión para leer lo que hay que aceptar para tener sesión es un círculo.
+
+**Las dos tablas, cerradas del todo.** Ni `anon` ni `authenticated` las tocan. Una tabla de consentimientos escribible desde el navegador no es una prueba.
+
+**Lo que esta migración NO hace, a propósito.** No impide pujar ni recargar a quien no haya aceptado. `mis_documentos_pendientes()` deja la puerta puesta, pero meter esa comprobación dentro de `hacer_puja` es tocar el camino del dinero y se decide aparte. La propuesta sobre la mesa: aviso bloqueante en la aplicación al entrar, y comprobación dura en `solicitar_recarga` — pujar sin saldo no hace daño; meter dinero sin haber aceptado nada sí.
+
+**Y el contrato licenciatario↔Jercol no vive aquí.** Si se guardara en esta aplicación, el registro de que el licenciatario aceptó las condiciones quedaría **en la base de datos de él**, que él controla. Eso no es una prueba, es una cortesía. Ese contrato se firma fuera.
+
+**Consecuencias.** `P75`, ocho condiciones. La que da la medida es la séptima: tras aceptar no queda nada pendiente, y al publicar la v3 **vuelve a estarlo** — que es el único motivo por el que versionar sirve de algo. Y la tercera: publicar la v2 deja el texto y la fecha de la v1 idénticos. El censo de P47 suma cuatro funciones; el de P48, dos tablas con todos los verbos en blanco.

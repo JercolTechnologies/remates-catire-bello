@@ -2741,6 +2741,10 @@ begin
       ('cancelar_remate',                 'auth'),
       ('casa_fundada',                    'anon'),
       ('datos_de_cobro',                  'auth'),
+      ('documentos_vigentes',             'anon'),
+      ('mis_documentos_pendientes',       'auth'),
+      ('aceptar_documentos',              'auth'),
+      ('publicar_documento',              'auth'),
       ('guardar_ajustes',                 'auth'),
       ('casa_resumen',                    'auth'),
       ('cerrar_remate',                   'auth'),
@@ -2966,6 +2970,12 @@ begin
       -- migraciones, y si la app pudiera borrar minimo_incremento no se
       -- podria crear un remate.
       ('ajustes_instalacion', 'select',                        ''),
+      -- textos legales y su prueba de aceptacion: CERRADAS del todo. Lo que
+      -- sale, sale por documentos_vigentes(); lo que entra, por
+      -- publicar_documento() y aceptar_documentos(). Una tabla de
+      -- consentimientos escribible desde el navegador no es una prueba.
+      ('documentos_legales',   '',                             ''),
+      ('aceptaciones_legales', '',                             ''),
       -- Motivos de rechazo: los lee el panel para armar el desplegable y el
       -- cliente para entender su rechazo. Son etiquetas, no datos de nadie.
       -- Sin insert ni delete: los codigos los crean las migraciones, porque
@@ -6491,6 +6501,191 @@ begin
       v_sin_cambio_ok,
       v_fuera_lista_ok, coalesce(v_sql_b, 'sin excepcion'), coalesce(v_valor, '-'),
       v_tabla_cerrada_ok));
+end $$;
+
+
+-- ============================================================================
+--  P75 - Se puede demostrar quien acepto que, y en que version
+--
+--  EL DEFECTO QUE EXISTE PARA IMPEDIR. La marca que ve el jugador es la de la
+--  plataforma (franquicia, 09/10), asi que el jugador que pierda dinero le
+--  escribe a la PLATAFORMA. La respuesta es un descargo, y un descargo solo
+--  sirve si se puede demostrar que esa persona lo acepto. La carga de la
+--  prueba es de quien lo invoca.
+--
+--  Y el agujero que hay que no abrir: si el texto de una version publicada se
+--  pudiera editar, cambiaria HACIA ATRAS lo que acepto cada persona, y todos
+--  los consentimientos anteriores quedarian sin valor.
+--
+--  LO QUE MIDE
+--   1. las dos tablas existen y estan CERRADAS a anon y authenticated
+--   2. un admin que no es super admin no publica; un texto de juguete tampoco
+--   3. el super admin publica v1, y publicar otra vez da v2 dejando la v1
+--      INTACTA -- texto y fecha
+--   4. `documentos_vigentes()` devuelve solo la publicada mas alta, y la lee
+--      `anon` (los terminos se leen ANTES de tener cuenta)
+--   5. un alta que dice que acepta queda registrada CON LA VERSION QUE PONE LA
+--      BASE, no la que diga el cliente
+--   6. un alta que NO dice nada no revienta -- con un repo sirviendo a N casas,
+--      el desfase de despliegue existe -- y queda con el documento pendiente
+--   7. tras aceptar no queda nada pendiente; al publicar v3 VUELVE a estarlo
+--   8. aceptar dos veces lo mismo devuelve 0 y no duplica la fila
+--
+--  REGLA DEL 28/09: se comprueba CUAL excepcion. Un 42883 significaria que la
+--  migracion no esta aplicada y la prueba no estaria probando nada.
+-- ============================================================================
+do $$
+declare
+  v_existe boolean;
+  v_super uuid; v_admin uuid;
+  v_con uuid := gen_random_uuid();
+  v_sin uuid := gen_random_uuid();
+
+  v_texto    text := repeat('Terminos y condiciones de prueba del arnes. ', 12);
+  v_texto_v2 text := repeat('Segunda version del texto, distinta de la primera. ', 12);
+  v_texto_v3 text := repeat('Tercera version, la que obliga a volver a aceptar. ', 12);
+
+  v_v1 integer; v_v2 integer; v_v3 integer;
+  v_v1_texto text; v_v1_fecha timestamptz; v_v1_texto_2 text; v_v1_fecha_2 timestamptz;
+  v_n integer; v_filas integer; v_vigentes_n integer;
+  v_version_reg integer;
+  v_sql_a text; v_sql_b text;
+
+  v_tablas_ok     boolean := false;
+  v_publicar_ok   boolean := false;
+  v_inmutable_ok  boolean := false;
+  v_vigentes_ok   boolean := false;
+  v_alta_con_ok   boolean := false;
+  v_alta_sin_ok   boolean := false;
+  v_reacepta_ok   boolean := false;
+  v_repetir_ok    boolean := false;
+begin
+  perform _p.limpiar();
+  delete from public.admin_actions;
+  delete from public.aceptaciones_legales;
+  delete from public.documentos_legales;
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'publicar_documento'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(75, 'Se puede demostrar quien acepto que, y en que version',
+      'documentos versionados e inmutables, con registro de aceptacion',
+      false, 'publicar_documento NO EXISTE: la migracion 20261011023500 no esta aplicada');
+    return;
+  end if;
+
+  -- 1) tablas cerradas
+  v_tablas_ok :=
+        to_regclass('public.documentos_legales')   is not null
+    and to_regclass('public.aceptaciones_legales') is not null
+    and not has_table_privilege('authenticated', 'public.documentos_legales',   'select')
+    and not has_table_privilege('anon',          'public.documentos_legales',   'select')
+    and not has_table_privilege('authenticated', 'public.aceptaciones_legales', 'select')
+    and not has_table_privilege('authenticated', 'public.aceptaciones_legales', 'insert');
+
+  v_super := _p.usuario('super75', 0, true);
+  v_admin := _p.usuario('admin75', 0, true);
+  update public.profiles set es_super_admin = false where id = v_admin;
+
+  -- 2) quien NO publica
+  perform _p.actuar_como(v_admin);
+  begin
+    perform public.publicar_documento('terminos', 'Terminos', v_texto, true);
+  exception when others then
+    v_sql_a := sqlstate;
+  end;
+
+  perform _p.actuar_como(v_super);
+  begin
+    perform public.publicar_documento('terminos', 'Terminos', 'hola', true);
+  exception when others then
+    v_sql_b := sqlstate;
+  end;
+
+  v_publicar_ok := v_sql_a = 'P0001' and v_sql_b = 'P0001'
+    and not exists (select 1 from public.documentos_legales);
+
+  -- 3) v1, luego v2, y la v1 intacta
+  select public.publicar_documento('terminos', 'Terminos y condiciones', v_texto, true) into v_v1;
+  select cuerpo, publicado_en into v_v1_texto, v_v1_fecha
+  from public.documentos_legales where codigo = 'terminos' and version = v_v1;
+
+  select public.publicar_documento('terminos', 'Terminos y condiciones', v_texto_v2, true) into v_v2;
+  select cuerpo, publicado_en into v_v1_texto_2, v_v1_fecha_2
+  from public.documentos_legales where codigo = 'terminos' and version = v_v1;
+
+  v_inmutable_ok := v_v1 = 1 and v_v2 = 2
+    and v_v1_texto_2 = v_v1_texto
+    and v_v1_fecha_2 = v_v1_fecha
+    and v_v1_texto <> v_texto_v2;
+
+  -- 4) vigentes = la mas alta, y la lee anon
+  select count(*)::int into v_vigentes_n from public.documentos_vigentes();
+  v_vigentes_ok := v_vigentes_n = 1
+    and exists (select 1 from public.documentos_vigentes() where version = 2 and cuerpo = v_texto_v2)
+    and has_function_privilege('anon', 'public.documentos_vigentes()', 'execute')
+    and not has_function_privilege('anon', 'public.publicar_documento(text,text,text,boolean)', 'execute')
+    and not has_function_privilege('anon', 'public.aceptar_documentos(text[])', 'execute');
+
+  -- 5) alta QUE acepta: la version la pone la base
+  insert into auth.users (id, raw_user_meta_data)
+  values (v_con, jsonb_build_object('username','acepta75','acepta', jsonb_build_array('terminos')));
+
+  select version into v_version_reg
+  from public.aceptaciones_legales where user_id = v_con and codigo = 'terminos';
+
+  v_alta_con_ok := v_version_reg = 2
+    and (select count(*) from public.aceptaciones_legales where user_id = v_con) = 1;
+
+  -- 6) alta que NO dice nada: no revienta, y queda pendiente
+  insert into auth.users (id, raw_user_meta_data)
+  values (v_sin, jsonb_build_object('username','calla75'));
+
+  perform _p.actuar_como(v_sin);
+  v_alta_sin_ok :=
+        exists (select 1 from public.profiles where id = v_sin)
+    and not exists (select 1 from public.aceptaciones_legales where user_id = v_sin)
+    and (select count(*) from public.mis_documentos_pendientes()) = 1;
+
+  -- 7) acepta -> sin pendientes; se publica v3 -> vuelve a tener
+  select public.aceptar_documentos(array['terminos']) into v_n;
+  v_reacepta_ok := v_n = 1
+    and (select count(*) from public.mis_documentos_pendientes()) = 0;
+
+  perform _p.actuar_como(v_super);
+  select public.publicar_documento('terminos', 'Terminos y condiciones', v_texto_v3, true) into v_v3;
+
+  perform _p.actuar_como(v_sin);
+  v_reacepta_ok := v_reacepta_ok and v_v3 = 3
+    and (select count(*) from public.mis_documentos_pendientes()) = 1
+    and exists (select 1 from public.mis_documentos_pendientes() where version = 3);
+
+  -- 8) repetir no duplica
+  select public.aceptar_documentos(array['terminos']) into v_n;
+  select public.aceptar_documentos(array['terminos']) into v_filas;
+  v_repetir_ok := v_n = 1 and v_filas = 0
+    and (select count(*) from public.aceptaciones_legales where user_id = v_sin) = 2;
+
+  -- La base vuelve a su estado de instalacion nueva.
+  delete from public.aceptaciones_legales;
+  delete from public.documentos_legales;
+
+  perform _p.anotar(75, 'Se puede demostrar quien acepto que, y en que version',
+    'tablas cerradas; solo el super admin publica y nunca edita una version publicada; vigentes es la mas alta y la lee anon; el alta registra la version que pone la base; sin metadata no revienta; publicar una version nueva obliga a re-aceptar; repetir no duplica',
+    v_tablas_ok and v_publicar_ok and v_inmutable_ok and v_vigentes_ok
+      and v_alta_con_ok and v_alta_sin_ok and v_reacepta_ok and v_repetir_ok,
+    format('tablas=%s | publicar=%s (admin:%s texto_corto:%s) | INMUTABLE=%s (v1=%s v2=%s, v1 intacta=%s) | vigentes=%s (%s fila) | alta_con=%s (version registrada=%s) | alta_sin=%s | REACEPTA=%s (v3=%s) | repetir=%s',
+      v_tablas_ok,
+      v_publicar_ok, coalesce(v_sql_a,'sin excepcion'), coalesce(v_sql_b,'sin excepcion'),
+      v_inmutable_ok, v_v1, v_v2, (v_v1_texto_2 = v_v1_texto),
+      v_vigentes_ok, v_vigentes_n,
+      v_alta_con_ok, coalesce(v_version_reg, -1),
+      v_alta_sin_ok,
+      v_reacepta_ok, coalesce(v_v3, -1),
+      v_repetir_ok));
 end $$;
 
 

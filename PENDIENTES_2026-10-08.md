@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (47 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (48 decisiones) y en el arnés.
 
-**Estado del proyecto:** 74/74 en `tests/pruebas_dinero.sql`, 4/4 en
+**Estado del proyecto:** 75/75 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 46 migraciones, 47 ADRs.
+31 en `tests/aviso_puja.mjs`. 47 migraciones, 48 ADRs.
 
 ---
 
@@ -44,6 +44,7 @@ detalla aquí: está en `ADR.md` (47 decisiones) y en el arnés.
 | Se cierra el `UPDATE` directo sobre `ajustes_instalacion`: todo pasa por `guardar_ajustes()` | ADR-047, P74 |
 | **`/admin/super/ajustes`**: el dueño pone sus datos de cobro y el nombre de su casa, con vista previa de lo que verá el jugador | ADR-047 |
 | **`/dashboard/recargar` deja de inventar**: lee de `datos_de_cobro()` y esconde el formulario si la casa no tiene dónde cobrar | ADR-047 |
+| **Documentos legales versionados e inmutables**, con registro de quién aceptó qué versión y cuándo | ADR-048, `20261011023500`, P75 |
 
 ---
 
