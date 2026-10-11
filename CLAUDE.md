@@ -19,8 +19,12 @@ Estas no se negocian ni se interpretan. Si una te estorba, dilo y para; no la ro
 
 1. **No toques git. Nunca.** Ni `add`, ni `commit`, ni `push`, ni `status`. Jota hace
    todo git él mismo. Tú le entregas el **mensaje de commit** y ya.
-2. **No escribas en la base de producción.** `pnpm db:push:produccion` lo corre Jota,
-   siempre. Es el único paso del ciclo que no se deshace con un `git revert`.
+2. **El push a la base lo haces tú** (cambiado el 11/10/2026). Jota se queda solo
+   con git. Es el único paso del ciclo que no se deshace con un `git revert`, así
+   que antes de empujar: arnés en verde, `migration list` para ver qué falta, y
+   `db push --dry-run`. **Y comprueba a qué proyecto estás enlazado**: el 11/10 el
+   repo estaba enlazado a la base de la LICENCIA, no a producción. `projects list`
+   dice cuál es cuál; `supabase/.temp/project-ref` dice a cuál apuntas.
    Lo que sí haces tú, desde el 07/10: **todo lo demás en su máquina** — el arnés,
    `pnpm db:reset`, `supabase migration list`, `db push --dry-run`, el typecheck,
    el lint, los `tests/*.mjs`. Antes se los pegaba él a mano y se perdía la mitad
@@ -119,7 +123,8 @@ docs/supabase/
 3. `npx -y supabase@2.118.0 db push --dry-run` — dice exactamente qué migraciones
    se van a aplicar sin aplicar ninguna. Si ahí aparece algo que no esperabas (una
    migración vieja que nunca llegó), te enteras **antes**.
-4. Jota hace respaldo y `pnpm db:push:produccion`. **Este paso es suyo, no tuyo.**
+4. Respaldo y `npx -y supabase@2.118.0 db push`. **Desde el 11/10/2026 este paso
+   es tuyo** — con el enlace comprobado primero (regla 2).
 5. **Comprobar que llegó**, antes de desplegar nada:
    `npx -y supabase@2.118.0 migration list` — enseña local y remoto lado a lado, que
    es más claro que consultar `supabase_migrations.schema_migrations` a mano.

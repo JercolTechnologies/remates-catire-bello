@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (46 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (47 decisiones) y en el arnés.
 
-**Estado del proyecto:** 73/73 en `tests/pruebas_dinero.sql`, 4/4 en
+**Estado del proyecto:** 74/74 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 45 migraciones, 46 ADRs.
+31 en `tests/aviso_puja.mjs`. 46 migraciones, 47 ADRs.
 
 ---
 
@@ -40,6 +40,8 @@ detalla aquí: está en `ADR.md` (46 decisiones) y en el arnés.
 | **`AvisoFundar`**: una instalación nueva ya sabe decirle a su dueño cómo empezar | ADR-045 |
 | **El fundador ya encuentra el registro**: `/admin/login` enlaza a `/register` cuando la casa no tiene dueño — bloqueó la primera instalación real | ADR-046 |
 | **Los errores de entrada dejan de ser los de Supabase en inglés**: `mensajeDeEntrada()`, por `code` y no por texto | ADR-046 |
+| **Los datos de cobro salen del código**: nueve claves por instalación, `datos_de_cobro()` solo con sesión, y escribir deja asiento | ADR-047, `20261011011500`, P74 |
+| Se cierra el `UPDATE` directo sobre `ajustes_instalacion`: todo pasa por `guardar_ajustes()` | ADR-047, P74 |
 
 ---
 

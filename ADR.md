@@ -1198,3 +1198,37 @@ Y el mismo hecho que pareció un síntoma resultó ser la prueba que cerró el c
 **Se decide por `code`, nunca por el texto.** `AuthError.code` está tipado como `ErrorCode` en `@supabase/auth-js` 2.87.1 —`'invalid_credentials'` y `'email_not_confirmed'` están en esa unión—; el texto del mensaje no es contrato de nada y cambia entre versiones.
 
 **Consecuencias.** No hay prueba de arnés que cubra esto: lo que falla es la ruta que una persona encuentra, y eso se verifica abriendo la pantalla. `tsc --noEmit` y `eslint` en verde.
+
+---
+
+## ADR-047 · Una sola cuenta bancaria para todas las casas
+
+**Fecha.** 11 de octubre de 2026 *(migración `20261011011500`)*
+
+**Contexto.** Pendiente 5.3, el ⛔ que quedaba. El banco, el teléfono de Pago Móvil, la cédula y el número de cuenta estaban escritos en el HTML de `app/dashboard/recargar/page.tsx`. Un repositorio, una rama, **dos proyectos de Vercel compilando lo mismo**: producción y la primera licencia le decían a sus jugadores que depositaran en la misma cuenta. Una de las dos casas estaba cobrando en la cuenta equivocada, y cuál de las dos depende de quién sea el titular — no hay tercera opción donde eso esté bien.
+
+No es un defecto cosmético: es la pantalla que le dice a una persona dónde poner su dinero. Y mientras siguiera en el código, cada licencia nueva exigía editar el repositorio y volver a desplegar — o sea, **Jercol decidiendo dónde cobra la casa del cliente**, que es justo lo contrario del ADR-045.
+
+**La tabla ya existía para esto.** La migración `20261005140000` lo dejó escrito un mes antes: *«va a ir creciendo: en el bloque de licencias le entran datos bancarios, SMTP y la marca»*. Esto es ese bloque. Nueve claves nuevas de tipo texto — siete de cobro y dos de marca.
+
+**Decisión: tres ventanillas, cada una con su público, y ninguna puerta.**
+
+| | Quién la usa | Qué deja pasar |
+|---|---|---|
+| `ajustes_publicos()` | `anon` + `authenticated` | las reglas del dinero **y la marca de la casa** |
+| `datos_de_cobro()` | **solo** `authenticated` | dónde se deposita |
+| `guardar_ajustes(jsonb)` | **solo** super admin | escribe, y **deja asiento** |
+
+**Por qué los datos de cobro no entran en `ajustes_publicos()`.** Esa función la llama `anon`, y un visitante sin cuenta no deposita. No es que la cuenta sea secreta — el jugador la ve —; es que no hace falta regalársela a un raspador. El nombre y el logo de la casa sí entran: se ven en la portada, antes de registrarse.
+
+**Y se cierra el `UPDATE` directo sobre la tabla.** La política `ajustes_cambia_superadmin` permitía escribir desde el navegador. Cambiar la cuenta donde cobra la casa es **la operación más sensible de toda la aplicación** — más que pagar un retiro, porque redirige *todos* los depósitos futuros — y pasaba sin rastro en la bitácora. Comprobado antes de cerrarla: el frontend solo hace `SELECT` sobre esa tabla (`crear-remate` y `remates/[id]`, los mínimos). Ningún `UPDATE`. Se revoca el privilegio, se borra la política, y todo pasa por la función.
+
+**La lista blanca de escritura no es la misma que la de lectura.** `minimo_incremento`, `minimo_precio_salida` y `pct_apostado_para_retirar` se leen en público pero **no se escriben desde la aplicación**: la base valida contra ellos, y un super admin bajándolos desde una pantalla podría crear remates que la propia base rechaza en otra ruta. Esos siguen cambiándose por migración.
+
+**Sin cambios no hay asiento.** Guardar el mismo formulario dos veces no es un hecho que registrar. La función compara clave por clave y solo escribe — y solo anota — lo que de verdad cambió, con el valor anterior y el nuevo en el mismo asiento.
+
+**Los valores nacen vacíos, a propósito.** Una instalación recién entregada no tiene datos de cobro, y la pantalla tiene que decir eso en vez de inventar unos. Sembrarlos con los de otro es exactamente el defecto que esta migración arregla, y P74 lo mide: si algún día alguien mete datos de ejemplo en el `insert`, la prueba se pone roja.
+
+**Consecuencias.** `P74`, ocho condiciones, validadas contra un Postgres 16 antes de escribir la prueba definitiva. La que da la medida es la séptima: `minimo_incremento` se rechaza aunque lo pida un super admin. Y la octava: la tabla ya no acepta `UPDATE` de `authenticated`, pero el `SELECT` sigue. El censo de P47 suma `datos_de_cobro` y `guardar_ajustes`.
+
+**Lo que esto NO cierra todavía.** La pantalla `/dashboard/recargar` sigue con los datos en el HTML hasta el bloque de frontend; esta migración prepara la base y no rompe nada mientras tanto, porque nada en la aplicación escribía esa tabla. Falta `/admin/super/ajustes`, que es donde el dueño pone los suyos sin que nadie entre a SQL — el requisito de verdad del modelo SaaS.

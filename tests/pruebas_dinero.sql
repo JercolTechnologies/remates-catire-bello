@@ -2740,6 +2740,8 @@ begin
       ('buscar_usuario_para_admin',       'auth'),
       ('cancelar_remate',                 'auth'),
       ('casa_fundada',                    'anon'),
+      ('datos_de_cobro',                  'auth'),
+      ('guardar_ajustes',                 'auth'),
       ('casa_resumen',                    'auth'),
       ('cerrar_remate',                   'auth'),
       ('fundar_super_admin',              'auth'),
@@ -2955,11 +2957,15 @@ begin
       -- esta lista con las otras tres hasta el 08/10. La escribe
       -- /admin/super/soporte, que es otra pantalla y necesita su propia RPC.
       ('support_settings',   'select,insert,update,delete',   'select'),
-      -- ajustes de ESTA instalacion: el panel de admin los lee para avisar
-      -- antes de guardar; solo el super admin cambia valores. Sin insert y
-      -- sin delete a proposito: las claves las crean las migraciones, y si
-      -- la app pudiera borrar minimo_incremento no se podria crear un remate.
-      ('ajustes_instalacion', 'select,update',                 ''),
+      -- ajustes de ESTA instalacion: SOLO LECTURA desde el 11/10 (ADR-047).
+      -- El panel los lee para avisar antes de guardar. El update cayo porque
+      -- cambiar donde cobra la casa redirige TODOS los depositos futuros y
+      -- pasaba sin asiento en la bitacora: ahora escribe guardar_ajustes(),
+      -- que es SECURITY DEFINER y registra que cambio, de que a que y quien.
+      -- Sin insert y sin delete a proposito: las claves las crean las
+      -- migraciones, y si la app pudiera borrar minimo_incremento no se
+      -- podria crear un remate.
+      ('ajustes_instalacion', 'select',                        ''),
       -- Motivos de rechazo: los lee el panel para armar el desplegable y el
       -- cliente para entender su rechazo. Son etiquetas, no datos de nadie.
       -- Sin insert ni delete: los codigos los crean las migraciones, porque
@@ -6303,6 +6309,188 @@ begin
       coalesce(v_perfil.admin_nombre,'-'), v_asientos,
       v_segunda_ok, coalesce(v_sql_d,'sin excepcion'), coalesce(left(v_msg_d,45),'-'),
       v_permisos_ok));
+end $$;
+
+
+-- ============================================================================
+--  P74 - Los datos de cobro son de la casa, y cambiarlos deja asiento
+--
+--  EL DEFECTO QUE EXISTE PARA IMPEDIR. El banco, el telefono de Pago Movil, la
+--  cedula y el numero de cuenta estaban clavados en el HTML de
+--  `/dashboard/recargar`. Un repositorio, dos despliegues: produccion y la
+--  primera licencia mandaban a sus jugadores a la MISMA cuenta. Es la pantalla
+--  que le dice a una persona donde poner su dinero.
+--
+--  Y el agujero que no hay que abrir al cerrarlo: si para cambiar esos datos
+--  bastara con un UPDATE desde el navegador, la operacion mas sensible de la
+--  aplicacion -- redirigir TODOS los depositos futuros -- pasaria sin rastro.
+--
+--  LO QUE MIDE
+--   1. las nueve claves existen, son de texto y NACEN VACIAS: la migracion no
+--      siembra los datos de nadie
+--   2. `datos_de_cobro()` la lee quien tiene sesion y NO `anon`; y
+--      `ajustes_publicos()`, que si lee `anon`, no devuelve ninguna `pago_*`
+--   3. un admin que no es super admin no puede guardar, y nada cambia
+--   4. el super admin guarda, y lo guardado es lo que devuelve la ventanilla
+--   5. queda UN asiento, con el valor de antes y el de despues
+--   6. guardar lo mismo otra vez devuelve 0 y NO deja un segundo asiento
+--   7. una clave fuera de la lista blanca -- `minimo_incremento`, contra la que
+--      la base valida -- se rechaza, y no cambia
+--   8. la tabla ya no acepta UPDATE de `authenticated`, y el SELECT sigue
+--
+--  REGLA DEL 28/09: se comprueba CUAL excepcion. Un 42883 significaria que la
+--  migracion no esta aplicada y la prueba no estaria probando nada.
+-- ============================================================================
+do $$
+declare
+  v_existe   boolean;
+  v_super    uuid; v_admin uuid;
+  v_n        int;
+  v_claves   int;
+  v_guardadas int;
+  v_vacias   int;
+  v_asientos int;
+  v_asiento  jsonb;
+  v_valor    text;
+  v_sql_a    text; v_sql_b text;
+
+  v_claves_ok        boolean := false;
+  v_lectura_ok       boolean := false;
+  v_admin_no_ok      boolean := false;
+  v_guarda_ok        boolean := false;
+  v_asiento_ok       boolean := false;
+  v_sin_cambio_ok    boolean := false;
+  v_fuera_lista_ok   boolean := false;
+  v_tabla_cerrada_ok boolean := false;
+begin
+  perform _p.limpiar();
+  delete from public.admin_actions;
+
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'guardar_ajustes'
+  ) into v_existe;
+
+  if not v_existe then
+    perform _p.anotar(74, 'Los datos de cobro son de la casa, y cambiarlos deja asiento',
+      'guardar_ajustes existe, respeta su lista blanca y deja asiento',
+      false, 'guardar_ajustes NO EXISTE: la migracion 20261011011500 no esta aplicada');
+    return;
+  end if;
+
+  -- 1) las nueve claves, de texto, y vacias.
+  --
+  --  Lo de "vacias" no es cosmetico: si la migracion sembrara unos datos
+  --  bancarios de ejemplo, una casa recien entregada estaria cobrando para
+  --  otro hasta que su dueno se diera cuenta. Vale porque el arnes corre
+  --  contra base reseteada y nada mas toca estas claves.
+  select count(*)::int,
+         count(*) filter (where valor = '')::int
+    into v_claves, v_vacias
+  from public.ajustes_instalacion
+  where clave in ('casa_nombre','casa_logo_url','pago_titular','pago_documento',
+                  'pago_movil_banco','pago_movil_telefono','pago_transf_banco',
+                  'pago_transf_tipo','pago_transf_numero')
+    and tipo = 'texto';
+
+  v_claves_ok := v_claves = 9 and v_vacias = 9;
+
+  -- 2) quien puede mirar por cada ventanilla
+  v_lectura_ok :=
+        has_function_privilege('authenticated', 'public.datos_de_cobro()', 'execute')
+    and not has_function_privilege('anon',      'public.datos_de_cobro()', 'execute')
+    and has_function_privilege('anon',          'public.ajustes_publicos()', 'execute')
+    and not exists (select 1 from public.ajustes_publicos() where clave like 'pago\_%')
+    and exists     (select 1 from public.ajustes_publicos() where clave = 'casa_nombre');
+
+  -- Un admin que NO es super admin. `_p.usuario` pone las dos banderas juntas.
+  v_super := _p.usuario('super74', 0, true);
+  v_admin := _p.usuario('admin74', 0, true);
+  update public.profiles set es_super_admin = false where id = v_admin;
+
+  -- 3) el admin normal no guarda
+  perform _p.actuar_como(v_admin);
+  begin
+    perform public.guardar_ajustes(jsonb_build_object('pago_titular', 'El vivo'));
+  exception when others then
+    v_sql_a := sqlstate;
+  end;
+  select valor into v_valor from public.ajustes_instalacion where clave = 'pago_titular';
+  v_admin_no_ok := v_sql_a = 'P0001' and v_valor = '';
+
+  -- 4) el super admin si, y lo guardado es lo que sale por la ventanilla
+  perform _p.actuar_como(v_super);
+  select public.guardar_ajustes(jsonb_build_object(
+    'casa_nombre',         'Remate El Zuliano',
+    'pago_titular',        'Maria Perez',
+    'pago_documento',      'V-12345678',
+    'pago_movil_banco',    'Banco de Venezuela',
+    'pago_movil_telefono', '04121112233'
+  )) into v_guardadas;
+
+  v_guarda_ok := v_guardadas = 5
+    and (select valor from public.ajustes_instalacion where clave = 'pago_titular') = 'Maria Perez'
+    -- de las siete de cobro quedaron cuatro con valor; `casa_nombre` es marca,
+    -- no cobro, y por eso NO sale por esta ventanilla.
+    and (select count(*) from public.datos_de_cobro() where valor <> '') = 4
+    and not exists (select 1 from public.datos_de_cobro() where clave = 'casa_nombre');
+
+  -- 5) un asiento, con antes y despues
+  select count(*)::int into v_asientos
+  from public.admin_actions where action = 'ajustes_casa';
+  select details into v_asiento
+  from public.admin_actions where action = 'ajustes_casa' limit 1;
+
+  v_asiento_ok := v_asientos = 1
+    and (v_asiento->>'cambios') = '5'
+    and (v_asiento->'antes'->>'pago_titular') = ''
+    and (v_asiento->'despues'->>'pago_titular') = 'Maria Perez';
+
+  -- 6) guardar lo mismo no es un hecho que registrar
+  select public.guardar_ajustes(jsonb_build_object('pago_titular', 'Maria Perez')) into v_n;
+  select count(*)::int into v_asientos
+  from public.admin_actions where action = 'ajustes_casa';
+  v_sin_cambio_ok := v_n = 0 and v_asientos = 1;
+
+  -- 7) fuera de la lista blanca: los minimos NO se tocan desde el navegador
+  begin
+    perform public.guardar_ajustes(jsonb_build_object('minimo_incremento', '1'));
+  exception when others then
+    v_sql_b := sqlstate;
+  end;
+  select valor into v_valor from public.ajustes_instalacion where clave = 'minimo_incremento';
+  v_fuera_lista_ok := v_sql_b = 'P0001' and v_valor <> '1';
+
+  -- 8) la puerta directa, cerrada
+  v_tabla_cerrada_ok :=
+        not has_table_privilege('authenticated', 'public.ajustes_instalacion', 'update')
+    and     has_table_privilege('authenticated', 'public.ajustes_instalacion', 'select')
+    and not exists (
+      select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'ajustes_instalacion'
+        and policyname = 'ajustes_cambia_superadmin');
+
+  -- Las claves vuelven a su estado de instalacion nueva.
+  update public.ajustes_instalacion set valor = ''
+   where clave in ('casa_nombre','casa_logo_url','pago_titular','pago_documento',
+                   'pago_movil_banco','pago_movil_telefono','pago_transf_banco',
+                   'pago_transf_tipo','pago_transf_numero');
+
+  perform _p.anotar(74, 'Los datos de cobro son de la casa, y cambiarlos deja asiento',
+    'las nueve claves nacen vacias; anon no ve los datos de cobro; un admin normal no los cambia; el super admin si y deja UN asiento con antes y despues; repetir no registra; una clave fuera de la lista se rechaza; la tabla ya no acepta UPDATE directo',
+    v_claves_ok and v_lectura_ok and v_admin_no_ok and v_guarda_ok
+      and v_asiento_ok and v_sin_cambio_ok and v_fuera_lista_ok and v_tabla_cerrada_ok,
+    format('claves=%s (%s de 9, %s vacias) | lectura=%s | admin_normal=%s (%s) | GUARDA=%s (n=%s) | asiento=%s (%s asientos, antes="%s" despues="%s") | repetir=%s | fuera_lista=%s (%s, minimo quedo en %s) | tabla_cerrada=%s',
+      v_claves_ok, v_claves, v_vacias,
+      v_lectura_ok,
+      v_admin_no_ok, coalesce(v_sql_a, 'sin excepcion'),
+      v_guarda_ok, v_guardadas,
+      v_asiento_ok, v_asientos,
+      coalesce(v_asiento->'antes'->>'pago_titular', '-'),
+      coalesce(v_asiento->'despues'->>'pago_titular', '-'),
+      v_sin_cambio_ok,
+      v_fuera_lista_ok, coalesce(v_sql_b, 'sin excepcion'), coalesce(v_valor, '-'),
+      v_tabla_cerrada_ok));
 end $$;
 
 
