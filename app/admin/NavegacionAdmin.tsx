@@ -41,7 +41,7 @@ import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 import { useCajaEnVivo } from "./CajaEnVivo"
-import { PLATAFORMA } from "@/lib/marca"
+import { PLATAFORMA, enlaceContacto } from "@/lib/marca"
 import { useCasa } from "@/app/components/MarcaCasa"
 
 type Punto = {
@@ -205,6 +205,17 @@ export default function NavegacionAdmin() {
                 className="block rounded-xl px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200">
             Ver la app como un jugador
           </Link>
+          {/* El soporte de la PLATAFORMA, no el de la casa. Va aqui y no en el
+              pie publico porque aqui esta exactamente quien lo necesita -- el
+              licenciatario -- y ningun jugador. */}
+          <a
+            href={enlaceContacto("soporte")}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block rounded-xl px-3 py-2 text-xs text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+          >
+            Soporte de la plataforma
+          </a>
         </div>
       </aside>
 

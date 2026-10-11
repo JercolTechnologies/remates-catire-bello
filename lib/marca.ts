@@ -118,18 +118,67 @@ export const PLATAFORMA: Marca = {
  */
 export type Casa = { nombre: string; logo?: string } | null
 
-/** Lo que va en el pie. AQUI es donde queda la referencia a la plataforma
- *  cuando la cabecera pasa a ser de la casa (decision de Jota: "en el footer
- *  ya se hacen las referencias").
+/**
+ * LOS ICONOS DEL SISTEMA, EN `public/`, NO EN `app/` (11/10/2026, ADR-051).
  *
- *  El año NO se escribe a mano: el `©2026` llevaba clavado desde enero y en
- *  enero de 2027 habria mentido. */
-export function pieDePagina(casa: Casa) {
+ * Estuvieron como `app/icon.png`, `app/apple-icon.png`, `app/favicon.ico` y
+ * `app/opengraph-image.png`, que son CONVENCIONES DE ARCHIVO de Next. Y la
+ * documentacion es tajante: "File-based metadata has the higher priority and
+ * will override the `metadata` object and `generateMetadata` function".
+ *
+ * Es decir: mientras esos archivos existieran, el icono de la pestana y la
+ * vista previa al compartir eran los NUESTROS en todas las casas, y no habia
+ * forma de cambiarlo desde el codigo. Medido el 11/10 en la licencia: la
+ * marca de la plataforma salia "en todos lados" porque salia en la pestana de
+ * todas las paginas.
+ *
+ * Se quitaron de `app/` y se declaran desde `generateMetadata`, que es lo que
+ * permite que una casa con logo ponga el suyo.
+ */
+export const ICONOS = {
+  icono: "/marca/icon.png",
+  apple: "/marca/apple-icon.png",
+  compartir: "/marca/opengraph-image.png",
+} as const
+
+/**
+ * Por donde se contacta con la plataforma.
+ *
+ * PROVISIONAL: el WhatsApp de Jercol hasta que exista la web de desarrollo.
+ * Decision de Jota del 11/10, sabiendo el riesgo que se le planteo -- que un
+ * jugador enfadado use este enlace en vez de escribirle a su casa. Por eso el
+ * mensaje va PRERRELLENADO: encauza a quien escriba, y deja claro de que va
+ * este canal.
+ */
+const WHATSAPP = "573019314319"
+
+export function enlaceContacto(
+  motivo: "licencia" | "soporte" = "licencia"
+) {
+  const texto =
+    motivo === "soporte"
+      ? `Hola, soy administrador de una casa en ${PLATAFORMA.nombre} y necesito soporte.`
+      : `Hola, vi ${PLATAFORMA.nombre} y quiero informacion para licenciar mi propio remate.`
+  return `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(texto)}`
+}
+
+/**
+ * EL PIE. Texto de Jota (11/10). Dice quien es duena de la plataforma, quien
+ * la desarrollo y QUIEN LA OPERA -- que es lo que no decia el anterior.
+ *
+ * Dos lineas, y la segunda SOLO existe si hay casa: en nuestra propia
+ * instalacion no hay licenciatario, y un "operada bajo licencia por" en blanco
+ * seria peor que no decir nada.
+ *
+ * El año NO se escribe a mano: el `©2026` llevaba clavado desde enero y en
+ * enero de 2027 habria mentido.
+ */
+export function pieDePagina(casa: Casa): { principal: string; licencia: string | null } {
   const anio = new Date().getFullYear()
-  if (!casa) {
-    return `${PLATAFORMA.nombre} ©${anio} Todos los derechos reservados. Desarrollado por Jercol Technologies.`
+  return {
+    principal: `© ${anio} ${PLATAFORMA.nombre}. Desarrollado por Jercol Technologies. Todos los derechos reservados.`,
+    licencia: casa ? `Plataforma operada bajo licencia por ${casa.nombre}.` : null,
   }
-  return `${casa.nombre} ©${anio} · Funciona con ${PLATAFORMA.nombre}, de Jercol Technologies.`
 }
 
 /** El titulo de la pestaña y de las vistas previas.

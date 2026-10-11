@@ -1353,3 +1353,33 @@ Quitarla convertiría el sitio en dinámico y pagaría una consulta por visita, 
 **Consecuencias.** `tsc` y `eslint` sin salida; el build mantiene las rutas estáticas y añade `ƒ /api/marca/revalidar`. No hay prueba de arnés: lo que falla aquí es cuándo se ve un cambio en pantalla, y eso se verifica mirando dos rutas de la misma instalación — que es exactamente como se encontró.
 
 **La lección, que ya había salido con el SVG en negativo (ADR-042) y con el camino al registro (ADR-046):** todo lo que mide el build estaba en verde. Lo que estaba mal solo se veía **abriendo la página**.
+
+---
+
+## ADR-051 · El icono de la pestaña también es marca
+
+**Fecha.** 11 de octubre de 2026 *(solo frontend, sin migración)*
+
+**Contexto.** Con el ADR-049 recién desplegado, Jota miró la licencia y dijo que la marca de la plataforma seguía apareciendo **«en TODOS LADOS»**. Lo era, literalmente, y eran **tres fugas, todas por omisión mía**. Se comprobaron leyendo el HTML servido, no preguntando:
+
+| Dónde | Qué salía |
+|---|---|
+| `/register` | `/marca/isotipo.svg`, con `alt="Remate Catire Bello"` |
+| El icono de la pestaña | `app/icon.png` y `app/favicon.ico` — en **todas** las páginas |
+| La vista previa al compartir | `og:image` → `/opengraph-image.png`, en cada enlace que comparte un jugador |
+
+`/remates` estaba bien: ni una imagen nuestra. El que se ve siempre es el de la pestaña, y por eso «todos lados» era exacto.
+
+**Lo que hizo falta averiguar antes de tocar nada.** El primer impulso — declarar `icons` en `generateMetadata` — **no habría funcionado**, y el build habría pasado igual. La documentación de Next 16 lo dice sin matices: *«File-based metadata has the higher priority and will override the `metadata` object and `generateMetadata` function»*. Mientras `app/icon.png` exista, gana el archivo.
+
+**Decisión: quitar las convenciones de archivo y declarar los iconos desde el código.** Se borran `app/icon.png`, `app/apple-icon.png`, `app/favicon.ico` y `app/opengraph-image.png`, y `generateMetadata` pone `icons` y `openGraph.images`: el logo de la casa si lo tiene, y si no los nuestros. **No se pierde nada**: los cuatro archivos ya existían en `public/marca/`, y se comprobó que son **byte a byte idénticos**. Verificado en el build: las rutas `/icon.png`, `/apple-icon.png` y `/opengraph-image.png` desaparecieron de la tabla.
+
+**No se deja un `favicon.ico` de respaldo.** Sería servir nuestra marca en `/favicon.ico` de todas las casas. El navegador solo lo pide a ciegas cuando la página no declara icono, y esta lo declara.
+
+**El pie, con el texto de Jota.** Dice de quién es la plataforma, quién la desarrolló y **quién la opera** — lo que el anterior no decía. La segunda línea solo existe si hay casa: en nuestra instalación no hay licenciatario y un «operada bajo licencia por» en blanco sería peor que callar.
+
+**El enlace de contacto va en el pie público, y es decisión de Jota contra mi recomendación.** Se le planteó que ese pie lo ve cada jugador de cada casa, y que el día que uno no cobre su retiro pulsará el único enlace de contacto que hay en la página — el nuestro — deshaciendo en parte el motivo por el que se bajó la marca. Su argumento: un jugador no baja al pie a reclamar, y hace falta una vía para el interesado. Acordado: el mensaje va **prerrellenado** para encauzar a quien escriba, y el soporte de la plataforma va **además** en el panel de admin, donde está el licenciatario y ningún jugador. Queda pendiente, por acuerdo, poner en las pantallas que toca un «quejas, reclamos y sugerencias» **con el correo del licenciatario**, que es lo que de verdad desvía.
+
+**Y de paso: `<html lang="en">` pasó a `"es"`.** Llevaba desde el primer día. Una aplicación entera en castellano declarándose en inglés afecta a lectores de pantalla y a buscadores.
+
+**Consecuencias.** `tsc` y `eslint` sin salida; el build limpio y sin las rutas de iconos. La lección se repite por cuarta vez (ADR-042, 046, 050): **todo lo que mide el build estaba en verde, y lo que estaba mal solo se veía mirando la página.** Esta vez la vio Jota.

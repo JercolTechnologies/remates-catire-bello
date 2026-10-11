@@ -7,7 +7,7 @@ import CabeceraCliente from "./components/CabeceraCliente";
 import NavegacionCliente from "./components/NavegacionCliente";
 import { RematesEnVivo } from "./components/RematesEnVivo";
 import { SesionCliente } from "./components/SesionCliente";
-import { pieDePagina, tituloDocumento, PLATAFORMA } from "@/lib/marca";
+import { pieDePagina, tituloDocumento, enlaceContacto, ICONOS, PLATAFORMA } from "@/lib/marca";
 import { casaDeLaInstalacion } from "@/lib/marcaCasa";
 import { ProveedorMarcaCasa } from "./components/MarcaCasa";
 
@@ -51,12 +51,25 @@ export async function generateMetadata(): Promise<Metadata> {
     ),
     title: titulo,
     description: DESCRIPCION,
+    // EL ICONO DE LA PESTANA Y LA VISTA PREVIA, POR INSTALACION (ADR-051).
+    //
+    // Esto solo funciona porque los archivos `app/icon.png`,
+    // `app/apple-icon.png`, `app/favicon.ico` y `app/opengraph-image.png` se
+    // BORRARON. Mientras existieran ganaban ellos: la documentacion dice que
+    // "file-based metadata has the higher priority and will override the
+    // metadata object and generateMetadata function". Los mismos archivos
+    // siguen disponibles en `public/marca/`, byte a byte.
+    icons: {
+      icon: casa?.logo || ICONOS.icono,
+      apple: casa?.logo || ICONOS.apple,
+    },
     openGraph: {
       title: titulo,
       description: DESCRIPCION,
       // `siteName` es el nombre del SITIO que comparte el enlace, y para el
       // jugador ese sitio es su casa, no la plataforma.
       siteName: casa ? casa.nombre : PLATAFORMA.nombre,
+      images: [casa?.logo || ICONOS.compartir],
       type: "website",
     },
   };
@@ -70,9 +83,10 @@ export default async function RootLayout({
   // Una sola lectura para toda la aplicacion: el titulo de arriba, el pie de
   // abajo y las cabeceras de cliente y de admin salen de aqui. Cacheada.
   const casa = await casaDeLaInstalacion();
+  const pie = pieDePagina(casa);
 
   return (
-    <html lang="en">
+    <html lang="es">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
@@ -100,10 +114,26 @@ export default async function RootLayout({
               arriba tiene que estar arriba en el documento. */}
           <CabeceraCliente />
           <div className="flex-1">{children}</div>
-          <footer className="py-4 text-center text-xs text-zinc-400">
-            {/* El año lo calcula lib/marca.ts. Estuvo clavado a mano como
-                "©2026" desde enero, y en enero de 2027 habria mentido. */}
-            {pieDePagina(casa)}
+          {/* EL PIE. Texto de Jota (11/10): dice de quien es la plataforma,
+              quien la desarrollo y QUIEN LA OPERA. La segunda linea solo
+              aparece si hay casa. El año lo calcula lib/marca.ts: estuvo
+              clavado como "©2026" desde enero y en enero de 2027 habria
+              mentido.
+
+              El enlace de contacto va aqui por decision de Jota, sabiendo que
+              lo ve tambien el jugador. El mensaje va prerrellenado para
+              encauzar a quien escriba. */}
+          <footer className="px-4 py-5 text-center text-xs leading-relaxed text-zinc-400">
+            <div>{pie.principal}</div>
+            {pie.licencia ? <div className="mt-0.5 text-zinc-500">{pie.licencia}</div> : null}
+            <a
+              href={enlaceContacto("licencia")}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-block text-zinc-500 underline underline-offset-4 hover:text-zinc-300"
+            >
+              ¿Quieres tu propio remate? Escríbenos
+            </a>
           </footer>
           {/* El menu de cliente en movil, una sola vez para toda la
               aplicacion. Ver components/NavegacionCliente.tsx */}

@@ -87,6 +87,30 @@ export function PortadaTitulo() {
 /** Solo el simbolo, arriba a la derecha. Queda en las pantallas de
  *  autenticacion, que no llevan cabecera (ADR-040). */
 export function CornerLogo({ href = "/remates" }: LogoProps) {
+  // SE ME PASO EN EL ADR-049 y lo encontro Jota: la portada y /login ya
+  // ensenaban la casa, pero /register -- donde un jugador de OTRA casa se crea
+  // la cuenta -- seguia con el isotipo de la plataforma. Comprobado en el HTML
+  // desplegado: `/marca/isotipo.svg` con alt "Remate Catire Bello".
+  const casa = useCasa()
+
+  if (casa) {
+    return (
+      <div className="flex justify-end">
+        <Link href={href} aria-label={casa.nombre} className="inline-flex items-center">
+          {casa.logo ? (
+            /* URL distinta por instalacion: ver CabeceraCliente. */
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={casa.logo} alt={casa.nombre} className="h-10 w-auto object-contain sm:h-12" />
+          ) : (
+            <span className="text-base font-bold tracking-tight text-oro sm:text-lg">
+              {casa.nombre}
+            </span>
+          )}
+        </Link>
+      </div>
+    )
+  }
+
   return (
     <div className="flex justify-end">
       <Link href={href} aria-label={PLATAFORMA.nombre} className="inline-flex">

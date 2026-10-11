@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (50 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (51 decisiones) y en el arnés.
 
 **Estado del proyecto:** 75/75 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 47 migraciones, 50 ADRs.
+31 en `tests/aviso_puja.mjs`. 47 migraciones, 51 ADRs.
 
 ---
 
@@ -47,6 +47,7 @@ detalla aquí: está en `ADR.md` (50 decisiones) y en el arnés.
 | **Documentos legales versionados e inmutables**, con registro de quién aceptó qué versión y cuándo | ADR-048, `20261011023500`, P75 |
 | **La marca de la casa manda donde la ve el jugador**; la plataforma, en el panel. `CASA` deja de ser constante y se lee de la base | ADR-049 |
 | **La caché de la marca se tira al guardar**: cambiar el nombre de la casa se ve al momento, no «dentro de un rato» | ADR-050 |
+| **El icono de la pestaña, la vista previa y `/register`** dejan de ser de la plataforma en las casas licenciadas; pie nuevo y `lang="es"` | ADR-051 |
 
 ---
 
@@ -148,6 +149,12 @@ Lo de la navegación y los anchos se cerró el 09/10 (ADR-040). Queda:
   la jerarquía se invirtió: **la casa manda donde la ve el jugador; la plataforma, en el
   panel, donde la ve el dueño.** Se tocó en seis archivos y en ninguna pantalla — lo que
   ADR-042 compró.
+- ⚠️ **«Quejas, reclamos y sugerencias» con el correo del licenciatario.** Acordado con
+  Jota el 11/10 como la contrapartida de poner el contacto de la plataforma en el pie
+  público: lo que de verdad desvía una reclamación no es esconder nuestra marca, es que
+  en la pantalla haya un sitio **evidente** al que escribir, con el correo de SU casa.
+  Necesita una clave nueva (`casa_correo_contacto`) y por tanto migración. Va junto con
+  la subida del logo.
 - ⚠️ **Subir el logo de la casa, no pegar una URL.** `casa_logo_url` es un campo de texto.
   Un dueño de remates tiene un PNG en el teléfono, no una URL. Con la casa ya dominante
   en la pantalla del jugador esto dejó de ser un detalle: Supabase Storage, un bucket,
