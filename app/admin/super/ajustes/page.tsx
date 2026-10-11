@@ -27,12 +27,28 @@
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
+import { prepararLogo } from "@/lib/logoCasa"
 
 type Campo = {
   clave: string
   etiqueta: string
   ayuda?: string
   ancho?: "medio" | "entero"
+  /** "logo" se pinta como subida de archivo, no como caja de texto. */
+  tipo?: "texto" | "logo"
+}
+
+/** El bucket y el prefijo de los archivos de marca. Ver 20261011162000. */
+const BUCKET = "marca"
+const PREFIJO_PUBLICO = `/storage/v1/object/public/${BUCKET}/`
+
+/** Si la URL apunta a NUESTRO bucket, devuelve el nombre del archivo. Sirve
+ *  para borrar el logo viejo al subir uno nuevo y no dejar basura. */
+function archivoDeNuestroBucket(url: string): string | null {
+  const i = url.indexOf(PREFIJO_PUBLICO)
+  if (i < 0) return null
+  const nombre = url.slice(i + PREFIJO_PUBLICO.length).split("?")[0]
+  return nombre || null
 }
 
 type Grupo = { titulo: string; nota?: string; campos: Campo[] }
@@ -46,7 +62,7 @@ const GRUPOS: Grupo[] = [
     nota: "El nombre se ensena junto al de la plataforma, nunca en su lugar.",
     campos: [
       { clave: "casa_nombre", etiqueta: "Nombre de la casa", ayuda: "Ej: Remate El Zuliano" },
-      { clave: "casa_logo_url", etiqueta: "URL del logo", ayuda: "Opcional. Sin logo se ensena solo el nombre.", ancho: "entero" },
+      { clave: "casa_logo_url", etiqueta: "Logo", ayuda: "Opcional. Sin logo se ensena solo el nombre, y queda digno.", ancho: "entero", tipo: "logo" },
     ],
   },
   {
@@ -89,6 +105,58 @@ export default function AjustesCasaPage() {
 
   const [valores, setValores] = useState<Record<string, string>>({})
   const [guardado, setGuardado] = useState<Record<string, string>>({})
+  const [subiendo, setSubiendo] = useState(false)
+  const [avisoLogo, setAvisoLogo] = useState("")
+
+  // El navegador recorta el aire del lienzo antes de subir: la gente exporta
+  // su logo centrado en un cuadrado, y en una cabecera de 32 px ese aire deja
+  // el dibujo ilegible. Medido con el logo del primer licenciatario: lienzo
+  // 1:1, dibujo 2.76:1 ocupando el 32% de la altura. Ver lib/logoCasa.ts.
+  async function subirLogo(file: File) {
+    setError("")
+    setOk("")
+    setAvisoLogo("")
+    setSubiendo(true)
+    try {
+      const preparado = await prepararLogo(file)
+
+      // Nombre con marca de tiempo: si se reescribiera siempre el mismo
+      // archivo, la URL no cambiaria y el navegador y el CDN seguirian
+      // sirviendo el logo viejo.
+      const nombre = `casa-${Date.now()}.png`
+      const { error: subErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(nombre, preparado.blob, { contentType: "image/png" })
+      if (subErr) throw new Error(subErr.message)
+
+      const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(nombre)
+
+      // Fuera el anterior, si era nuestro. Si falla, no se interrumpe nada:
+      // lo que queda es un archivo huerfano, no un logo roto.
+      const viejo = archivoDeNuestroBucket(valores.casa_logo_url ?? "")
+      if (viejo) {
+        const { error: delErr } = await supabase.storage.from(BUCKET).remove([viejo])
+        if (delErr) console.warn("[logo] no se pudo borrar el anterior:", delErr.message)
+      }
+
+      setValores((v) => ({ ...v, casa_logo_url: pub.publicUrl }))
+      setAvisoLogo(`${preparado.resumen} Pulsa Guardar para que lo vean tus jugadores.`)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "No se pudo subir el logo")
+    } finally {
+      setSubiendo(false)
+    }
+  }
+
+  async function quitarLogo() {
+    const viejo = archivoDeNuestroBucket(valores.casa_logo_url ?? "")
+    if (viejo) {
+      const { error: delErr } = await supabase.storage.from(BUCKET).remove([viejo])
+      if (delErr) console.warn("[logo] no se pudo borrar:", delErr.message)
+    }
+    setValores((v) => ({ ...v, casa_logo_url: "" }))
+    setAvisoLogo("Logo quitado. Pulsa Guardar para confirmarlo.")
+  }
 
   const cargar = useCallback(async () => {
     setError("")
@@ -222,18 +290,72 @@ export default function AjustesCasaPage() {
             {g.nota ? <p className="mt-1 text-xs text-zinc-500">{g.nota}</p> : null}
 
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {g.campos.map((c) => (
-                <label key={c.clave} className={c.ancho === "entero" ? "block sm:col-span-2" : "block"}>
-                  <span className="text-xs text-zinc-400">{c.etiqueta}</span>
-                  <input
-                    value={valores[c.clave] ?? ""}
-                    onChange={(e) => setValores((v) => ({ ...v, [c.clave]: e.target.value }))}
-                    disabled={!esSuper || guardando}
-                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/10 disabled:opacity-60"
-                  />
-                  {c.ayuda ? <span className="mt-1 block text-[11px] text-zinc-600">{c.ayuda}</span> : null}
-                </label>
-              ))}
+              {g.campos.map((c) =>
+                c.tipo === "logo" ? (
+                  <div key={c.clave} className="block sm:col-span-2">
+                    <span className="text-xs text-zinc-400">{c.etiqueta}</span>
+                    <div className="mt-1 flex flex-wrap items-center gap-3">
+                      {valores.casa_logo_url ? (
+                        // Sobre chip claro, que es como se pinta en la cabecera:
+                        // la vista previa tiene que mentir lo menos posible.
+                        <span className="inline-flex items-center rounded-xl bg-zinc-100 px-3 py-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={valores.casa_logo_url} alt="Logo de la casa" className="h-8 w-auto object-contain" />
+                        </span>
+                      ) : (
+                        <span className="text-xs text-zinc-600">Todavía no has subido ninguno.</span>
+                      )}
+
+                      <label className="cursor-pointer rounded-xl border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">
+                        {subiendo ? "Preparando..." : valores.casa_logo_url ? "Cambiar" : "Subir logo"}
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          disabled={!esSuper || subiendo || guardando}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0]
+                            // Se limpia el input para que elegir el MISMO archivo
+                            // otra vez vuelva a disparar el evento.
+                            e.target.value = ""
+                            if (f) void subirLogo(f)
+                          }}
+                        />
+                      </label>
+
+                      {valores.casa_logo_url ? (
+                        <button
+                          type="button"
+                          onClick={() => void quitarLogo()}
+                          disabled={!esSuper || subiendo || guardando}
+                          className="rounded-xl px-2 py-2 text-xs text-zinc-500 underline underline-offset-4 hover:text-zinc-300 disabled:opacity-60"
+                        >
+                          Quitar
+                        </button>
+                      ) : null}
+                    </div>
+                    {avisoLogo ? (
+                      <span className="mt-2 block text-[11px] text-emerald-300/80">{avisoLogo}</span>
+                    ) : c.ayuda ? (
+                      <span className="mt-1 block text-[11px] text-zinc-600">{c.ayuda}</span>
+                    ) : null}
+                    <span className="mt-1 block text-[11px] text-zinc-600">
+                      PNG, JPG o WEBP, hasta 2 MB. Le quitamos el espacio sobrante solos.
+                    </span>
+                  </div>
+                ) : (
+                  <label key={c.clave} className={c.ancho === "entero" ? "block sm:col-span-2" : "block"}>
+                    <span className="text-xs text-zinc-400">{c.etiqueta}</span>
+                    <input
+                      value={valores[c.clave] ?? ""}
+                      onChange={(e) => setValores((v) => ({ ...v, [c.clave]: e.target.value }))}
+                      disabled={!esSuper || guardando}
+                      className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/10 disabled:opacity-60"
+                    />
+                    {c.ayuda ? <span className="mt-1 block text-[11px] text-zinc-600">{c.ayuda}</span> : null}
+                  </label>
+                )
+              )}
             </div>
           </section>
         ))}

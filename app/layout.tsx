@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Link from "next/link";
 import AvisosDelUsuario from "./components/AvisosDelUsuario";
 import AvisoFundar from "./components/AvisoFundar";
 import CabeceraCliente from "./components/CabeceraCliente";
@@ -126,6 +127,17 @@ export default async function RootLayout({
           <footer className="px-4 py-5 text-center text-xs leading-relaxed text-zinc-400">
             <div>{pie.principal}</div>
             {pie.licencia ? <div className="mt-0.5 text-zinc-500">{pie.licencia}</div> : null}
+            {/* Primero el de la CASA. El jugador que baja al pie suele venir
+                con un problema, y lo primero que tiene que encontrar es a
+                quien se lo resuelve -- no a nosotros. */}
+            <div className="mt-1">
+              <Link
+                href="/contactanos"
+                className="text-zinc-400 underline underline-offset-4 hover:text-zinc-200"
+              >
+                Quejas, reclamos y sugerencias
+              </Link>
+            </div>
             <a
               href={enlaceContacto("licencia")}
               target="_blank"

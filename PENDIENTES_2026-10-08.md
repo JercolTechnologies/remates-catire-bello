@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (51 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (52 decisiones) y en el arnés.
 
-**Estado del proyecto:** 75/75 en `tests/pruebas_dinero.sql`, 4/4 en
+**Estado del proyecto:** 76/76 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 47 migraciones, 51 ADRs.
+31 en `tests/aviso_puja.mjs`. 48 migraciones, 52 ADRs.
 
 ---
 
@@ -48,6 +48,7 @@ detalla aquí: está en `ADR.md` (51 decisiones) y en el arnés.
 | **La marca de la casa manda donde la ve el jugador**; la plataforma, en el panel. `CASA` deja de ser constante y se lee de la base | ADR-049 |
 | **La caché de la marca se tira al guardar**: cambiar el nombre de la casa se ve al momento, no «dentro de un rato» | ADR-050 |
 | **El icono de la pestaña, la vista previa y `/register`** dejan de ser de la plataforma en las casas licenciadas; pie nuevo y `lang="es"` | ADR-051 |
+| **El dueño sube su logo** — recortado solo en el navegador, sobre chip claro para que se lea — y `/contactanos` dice quién responde | ADR-052, `20261011162000`, P76 |
 
 ---
 
@@ -149,18 +150,13 @@ Lo de la navegación y los anchos se cerró el 09/10 (ADR-040). Queda:
   la jerarquía se invirtió: **la casa manda donde la ve el jugador; la plataforma, en el
   panel, donde la ve el dueño.** Se tocó en seis archivos y en ninguna pantalla — lo que
   ADR-042 compró.
-- ⚠️ **«Quejas, reclamos y sugerencias» con el correo del licenciatario.** Acordado con
-  Jota el 11/10 como la contrapartida de poner el contacto de la plataforma en el pie
-  público: lo que de verdad desvía una reclamación no es esconder nuestra marca, es que
-  en la pantalla haya un sitio **evidente** al que escribir, con el correo de SU casa.
-  Necesita una clave nueva (`casa_correo_contacto`) y por tanto migración. Va junto con
-  la subida del logo.
-- ⚠️ **Subir el logo de la casa, no pegar una URL.** `casa_logo_url` es un campo de texto.
-  Un dueño de remates tiene un PNG en el teléfono, no una URL. Con la casa ya dominante
-  en la pantalla del jugador esto dejó de ser un detalle: Supabase Storage, un bucket,
-  política de subida solo para super admin, y un control de archivo en
-  `/admin/super/ajustes`. Mientras tanto el respaldo es digno — el nombre bien
-  tipografiado — pero no es lo que se promete al enseñar el producto.
+- ~~**«Quejas, reclamos y sugerencias»**~~ y ~~**subir el logo**~~: **cerrados el 11/10**
+  (ADR-052, `20261011162000`, P76). Lo del contacto **no necesitó migración**:
+  `support_settings` ya existía con su pantalla y su página; faltaba decir de quién son
+  los canales. Queda una cosa suelta: **`/contactanos` sigue sin estar en el menú del
+  pie en móvil con suficiente peso**, y conviene mirar si el jugador lo encuentra de
+  verdad cuando tiene un problema — eso se comprueba con alguien usando la app, no
+  leyendo el código.
 - **El isotipo se usa en versión con degradado, no `-mono`.** Las piezas `-mono`
   (`currentColor`) existen y están listas, pero nadie las usa todavía. Son las que harán
   falta el día que un licenciatario quiera su color.

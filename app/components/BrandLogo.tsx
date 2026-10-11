@@ -36,6 +36,24 @@ type LogoProps = {
 }
 
 /** El conjunto apilado: simbolo y nombre. Portada y login. */
+/**
+ * EL CHIP CLARO NO ES DECORACION (ADR-052).
+ *
+ * Se midio con el logo del primer licenciatario: la palabra "REMATE" tiene
+ * luminancia mediana 35 sobre 255, con el 100% de sus pixeles por debajo de
+ * 60. El fondo de la aplicacion es 9. Sobre el negro, esa palabra desaparece.
+ *
+ * Y no es culpa de ese logo: casi todos los logos se disenan sobre blanco. En
+ * una franquicia con N logos desconocidos, no se puede revisar cada uno a
+ * mano ni pedirle a cada licenciatario una version para fondo oscuro. El chip
+ * claro hace legible cualquiera que suban, sin preguntar nada.
+ */
+function ChipLogo({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-xl bg-zinc-100 px-2.5 py-1.5">{children}</span>
+  )
+}
+
 export function HeroLogo({ href = "/remates" }: LogoProps) {
   // La portada y las pantallas de entrada las ve el JUGADOR: su casa manda
   // (ADR-049). Sin casa, la instalacion es la nuestra y se pinta la nuestra.
@@ -47,8 +65,10 @@ export function HeroLogo({ href = "/remates" }: LogoProps) {
         {casa.logo ? (
           /* URL distinta por instalacion: no se puede declarar en
              next.config.ts en tiempo de compilacion. Ver CabeceraCliente. */
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={casa.logo} alt={casa.nombre} className="mx-auto h-auto w-[180px] object-contain sm:w-[220px]" />
+          <ChipLogo>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={casa.logo} alt={casa.nombre} className="h-auto w-[170px] object-contain sm:w-[210px]" />
+          </ChipLogo>
         ) : (
           // Sin logo, el nombre ES el logo. Mejor un nombre bien puesto que el
           // simbolo de otra marca haciendo de suplente.
@@ -99,8 +119,10 @@ export function CornerLogo({ href = "/remates" }: LogoProps) {
         <Link href={href} aria-label={casa.nombre} className="inline-flex items-center">
           {casa.logo ? (
             /* URL distinta por instalacion: ver CabeceraCliente. */
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={casa.logo} alt={casa.nombre} className="h-10 w-auto object-contain sm:h-12" />
+            <ChipLogo>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={casa.logo} alt={casa.nombre} className="h-8 w-auto object-contain sm:h-10" />
+            </ChipLogo>
           ) : (
             <span className="text-base font-bold tracking-tight text-oro sm:text-lg">
               {casa.nombre}

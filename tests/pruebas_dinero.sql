@@ -6689,6 +6689,132 @@ begin
 end $$;
 
 
+-- ============================================================================
+--  P76 - El logo de la casa se sube a un sitio con llave
+--
+--  EL DEFECTO QUE EXISTE PARA IMPEDIR. El logo lo ve TODO EL MUNDO en la
+--  portada, asi que el bucket es publico y eso esta bien. Lo que no puede ser
+--  publico es ESCRIBIRLO: la cabecera de la casa no la cambia cualquiera con
+--  sesion, igual que no la cambian los datos de cobro (ADR-047).
+--
+--  Y dos agujeros concretos que esta prueba vigila:
+--
+--   1. Las politicas van sobre `storage.objects`, que COMPARTEN todos los
+--      buckets de la instalacion. Una politica sin `bucket_id = 'marca'`
+--      abriria tambien cualquier bucket que se cree manana.
+--   2. Un SVG es un documento con scripts dentro. Aceptarlo de subida en un
+--      bucket publico es aceptar codigo ajeno. El navegador reconvierte a PNG
+--      antes de subir, asi que no hace ninguna falta.
+--
+--  LO QUE MIDE
+--   1. el bucket existe, es publico y tiene limite de tamano
+--   2. NO acepta SVG
+--   3. existen las cuatro politicas
+--   4. las TRES de escritura exigen is_super_admin(); la de lectura no
+--   5. las cuatro filtran por bucket_id = 'marca'
+--   6. `anon` lee; `anon` no escribe por ninguna de las tres
+-- ============================================================================
+do $$
+declare
+  v_publico boolean; v_limite bigint; v_tipos text[];
+  v_politicas int;
+  v_escritura_con_super int;
+  v_sin_filtro int;
+  v_lectura_anon boolean;
+  v_escritura_anon int;
+
+  v_bucket_ok   boolean := false;
+  v_sin_svg_ok  boolean := false;
+  v_cuatro_ok   boolean := false;
+  v_super_ok    boolean := false;
+  v_filtro_ok   boolean := false;
+  v_anon_ok     boolean := false;
+begin
+  if to_regclass('storage.buckets') is null then
+    perform _p.anotar(76, 'El logo de la casa se sube a un sitio con llave',
+      'bucket publico de lectura y privado de escritura',
+      false, 'storage.buckets NO EXISTE: esta base no tiene el modulo de almacenamiento');
+    return;
+  end if;
+
+  select b.public, b.file_size_limit, b.allowed_mime_types
+    into v_publico, v_limite, v_tipos
+  from storage.buckets b where b.id = 'marca';
+
+  if v_publico is null then
+    perform _p.anotar(76, 'El logo de la casa se sube a un sitio con llave',
+      'bucket publico de lectura y privado de escritura',
+      false, 'el bucket "marca" NO EXISTE: la migracion 20261011162000 no esta aplicada');
+    return;
+  end if;
+
+  -- 1) el bucket
+  v_bucket_ok := v_publico = true and v_limite is not null and v_limite <= 5242880;
+
+  -- 2) sin SVG
+  v_sin_svg_ok := v_tipos is not null
+    and not ('image/svg+xml' = any (v_tipos))
+    and 'image/png' = any (v_tipos);
+
+  -- 3) las cuatro politicas
+  select count(*)::int into v_politicas
+  from pg_policies
+  where schemaname = 'storage' and tablename = 'objects' and policyname like 'marca!_%' escape '!';
+  v_cuatro_ok := v_politicas = 4;
+
+  -- 4) escribir exige super admin
+  select count(*)::int into v_escritura_con_super
+  from pg_policies
+  where schemaname = 'storage' and tablename = 'objects'
+    and policyname like 'marca!_%' escape '!'
+    and cmd in ('INSERT', 'UPDATE', 'DELETE')
+    and coalesce(qual, '') || coalesce(with_check, '') like '%is_super_admin()%';
+  v_super_ok := v_escritura_con_super = 3
+    and not exists (
+      select 1 from pg_policies
+      where schemaname = 'storage' and tablename = 'objects'
+        and policyname like 'marca!_%' escape '!'
+        and cmd = 'SELECT'
+        and coalesce(qual, '') like '%is_super_admin()%');
+
+  -- 5) todas acotadas al bucket. Sin esto, abririan los buckets futuros.
+  select count(*)::int into v_sin_filtro
+  from pg_policies
+  where schemaname = 'storage' and tablename = 'objects'
+    and policyname like 'marca!_%' escape '!'
+    and coalesce(qual, '') || coalesce(with_check, '') not like '%bucket_id = ''marca''%';
+  v_filtro_ok := v_sin_filtro = 0;
+
+  -- 6) quien es anon aqui
+  select exists (
+    select 1 from pg_policies
+    where schemaname = 'storage' and tablename = 'objects'
+      and policyname like 'marca!_%' escape '!'
+      and cmd = 'SELECT' and 'anon' = any (roles)
+  ) into v_lectura_anon;
+
+  select count(*)::int into v_escritura_anon
+  from pg_policies
+  where schemaname = 'storage' and tablename = 'objects'
+    and policyname like 'marca!_%' escape '!'
+    and cmd in ('INSERT', 'UPDATE', 'DELETE')
+    and 'anon' = any (roles);
+
+  v_anon_ok := v_lectura_anon and v_escritura_anon = 0;
+
+  perform _p.anotar(76, 'El logo de la casa se sube a un sitio con llave',
+    'bucket publico con limite y sin SVG; cuatro politicas; escribir exige super admin; todas acotadas a su bucket; anon lee y no escribe',
+    v_bucket_ok and v_sin_svg_ok and v_cuatro_ok and v_super_ok and v_filtro_ok and v_anon_ok,
+    format('bucket=%s (publico=%s limite=%s) | SIN_SVG=%s (%s) | politicas=%s (%s) | super=%s (%s de 3 escrituras) | FILTRO_BUCKET=%s (%s sin filtrar) | anon=%s (lee=%s, escribe en %s)',
+      v_bucket_ok, v_publico, coalesce(v_limite::text, 'sin limite'),
+      v_sin_svg_ok, coalesce(array_to_string(v_tipos, ', '), 'cualquiera'),
+      v_cuatro_ok, v_politicas,
+      v_super_ok, v_escritura_con_super,
+      v_filtro_ok, v_sin_filtro,
+      v_anon_ok, v_lectura_anon, v_escritura_anon));
+end $$;
+
+
 -- ---------------------------------------------------------------- resumen
 \set QUIET off
 select n as "#", nombre, esperado, estado, detalle from _p.resultado order by n;

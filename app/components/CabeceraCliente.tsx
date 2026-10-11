@@ -97,12 +97,19 @@ export default function CabeceraCliente() {
                next.config.ts, y el logo de cada casa es una URL distinta que no
                existe en tiempo de compilacion: un repositorio, N casas. Por eso
                aqui va una etiqueta normal. */
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={casa.logo}
-              alt={casa.nombre}
-              className="h-8 w-8 shrink-0 object-contain sm:h-9 sm:w-9"
-            />
+            /* Alto fijo y ancho LIBRE. La caja cuadrada de antes daba por
+               hecho un isotipo; casi todos los logos de casa son apaisados --
+               el del primer licenciatario es 2.76:1 -- y en 36x36 quedaban en
+               32x11 pixeles. Y sobre chip claro, porque medido sobre el fondo
+               negro la mitad del logo no se leia. Ver ADR-052. */
+            <span className="inline-flex shrink-0 items-center rounded-xl bg-zinc-100 px-2 py-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={casa.logo}
+                alt={casa.nombre}
+                className="h-6 w-auto max-w-[150px] object-contain sm:h-7 sm:max-w-[200px]"
+              />
+            </span>
           ) : !casa ? (
             <Image
               src={PLATAFORMA.isotipo}
@@ -113,11 +120,16 @@ export default function CabeceraCliente() {
               className="h-8 w-8 shrink-0 object-contain sm:h-9 sm:w-9"
             />
           ) : null}
-          <span className={casa && !casa.logo ? "block min-w-0" : "hidden min-w-0 sm:block"}>
-            <span className="block truncate text-sm font-semibold leading-tight text-oro">
-              {casa ? casa.nombre : PLATAFORMA.corto}
+          {/* Con logo NO se repite el nombre al lado: el nombre ya esta
+              dentro del logo, y decirlo dos veces es ruido. Sin logo, el
+              nombre es lo unico que hay, asi que se ve tambien en movil. */}
+          {casa?.logo ? null : (
+            <span className={casa ? "block min-w-0" : "hidden min-w-0 sm:block"}>
+              <span className="block truncate text-sm font-semibold leading-tight text-oro">
+                {casa ? casa.nombre : PLATAFORMA.corto}
+              </span>
             </span>
-          </span>
+          )}
         </Link>
 
         {/* EL MENU, EN ESCRITORIO. En movil no se pinta aqui: vive en la barra

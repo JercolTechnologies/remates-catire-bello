@@ -1383,3 +1383,46 @@ Quitarla convertiría el sitio en dinámico y pagaría una consulta por visita, 
 **Y de paso: `<html lang="en">` pasó a `"es"`.** Llevaba desde el primer día. Una aplicación entera en castellano declarándose en inglés afecta a lectores de pantalla y a buscadores.
 
 **Consecuencias.** `tsc` y `eslint` sin salida; el build limpio y sin las rutas de iconos. La lección se repite por cuarta vez (ADR-042, 046, 050): **todo lo que mide el build estaba en verde, y lo que estaba mal solo se veía mirando la página.** Esta vez la vio Jota.
+
+---
+
+## ADR-052 · Subir un logo, no pegar una URL — y que se lea
+
+**Fecha.** 11 de octubre de 2026 *(migración `20261011162000`)*
+
+**Contexto.** `casa_logo_url` nació esa misma mañana (ADR-047) como un campo de texto donde hay que escribir una URL. Jota lo dijo en cuanto lo usó: *«debiste haberle puesto en la pasada anterior para subir imagen directo»*. Tenía razón: un dueño de remates tiene un PNG en el teléfono, no una URL. Y desde el ADR-049, con la marca de la casa mandando en la pantalla del jugador, sin subida la mayoría de las casas se quedan con el nombre en texto.
+
+**Lo que se midió antes de escribir una línea**, sobre el logo real del primer licenciatario:
+
+- Las dos versiones (PNG con transparencia y JPG) son **lienzos 1:1**, pero el dibujo real es **2.76:1** y ocupa **el 32% de la altura**. El 68% es aire. En una cabecera de 32 px eso deja el dibujo en unos **32×11 píxeles**.
+- La palabra «REMATE» tiene **luminancia mediana 35 sobre 255**, con el **100%** de sus píxeles por debajo de 60. El fondo de la aplicación es **9**. Sobre el negro, esa palabra **desaparece**.
+
+Ninguna de las dos cosas se veía en el código. Se vieron pintándolas.
+
+**Decisión 1: el bucket.** `marca`, público de lectura — lo que guarda es un logo que se enseña en la portada a cualquiera, sin sesión; un bucket privado obligaría a firmar una URL por visita para algo que ya es público por definición — y **escritura solo para el super admin**, la misma regla que los datos de cobro.
+
+**Sin SVG, a propósito.** Un SVG es un documento con scripts dentro; aceptarlo de subida en un bucket público es aceptar código ajeno. El navegador reencoda a PNG, así que no hace falta.
+
+**Las políticas van acotadas por `bucket_id`**, y eso no es cosmético: `storage.objects` la comparten **todos** los buckets de la instalación, así que una política sin ese filtro abriría también los que se creen mañana. **P76** lo vigila.
+
+**Y el riesgo del bloque se verificó primero:** crear políticas sobre `storage.objects` desde una migración **funciona** — es un fallo común por propiedad de la tabla, y aquí no se dio. Probado en local antes de tocar producción.
+
+**Decisión 2: el recorte lo hace el navegador.** Lienzo, `getImageData`, caja mínima, reencodado a PNG y escalado a 512 px de lado mayor. Sin servicio de imágenes y sin que el servidor toque los bytes de nadie.
+
+**Cómo decide qué es aire, que es donde estaba la trampa:**
+
+- **Con transparencia real** → se recorta por el canal alfa.
+- **Opaca** → se miran las **cuatro esquinas**: si coinciden, ese es el fondo y se recorta lo que se le parezca. Vale para blanco y para cualquier color sólido.
+- **Esquinas distintas** → el fondo no es sólido y **no se recorta nada**. Comerse medio logo es peor que dejar aire.
+
+**Decisión 3: chip claro detrás del logo.** No es decoración: es la respuesta a la medida de luminancia. Y no es culpa de ese logo — casi todos se diseñan sobre blanco. En una franquicia con N logos desconocidos no se puede revisar cada uno a mano ni pedirle a cada licenciatario una versión para fondo oscuro. El chip hace legible cualquiera que suban, sin preguntar nada.
+
+**Y la caja deja de ser cuadrada.** Era `h-8 w-8`, que daba por hecho un isotipo. Casi todos los logos de casa son apaisados. Ahora es **alto fijo, ancho libre con tope**.
+
+**Con logo no se repite el nombre al lado.** Ya está dentro del logo.
+
+**Decisión 4: el nombre con marca de tiempo.** Si se reescribiera siempre `logo.png`, la URL no cambiaría y el navegador y el CDN seguirían sirviendo el logo viejo — el mismo tipo de fallo que el ADR-050. Al subir uno nuevo se borra el anterior si era nuestro; si ese borrado falla, lo que queda es un archivo huérfano, no un logo roto.
+
+**Lo que NO hizo falta, y casi hago.** Para el «quejas, reclamos y sugerencias» iba a crear una clave `casa_correo_contacto`— y **`support_settings` ya existía**, con su pantalla en `/admin/super/soporte` y su página en `/contactanos`, ya enlazada desde el menú del jugador y con los enlaces activos (el pendiente que decía lo contrario estaba obsoleto). Una segunda fuente para el mismo dato habría sido el defecto, no el arreglo. Lo que faltaba era **texto**: `/contactanos` decía «escríbenos» sin decir quién es «nos» — que en una casa licenciada se lee como la plataforma, y es justo al revés. Ahora nombra a la casa y dice que **ella** recibe los depósitos, paga los retiros y responde por los reclamos. Y el pie enlaza ahí, **antes** que a nosotros: el jugador que baja al pie suele venir con un problema.
+
+**Consecuencias.** `P76`, seis condiciones, incluidas las dos que vigilan los agujeros: que las cuatro políticas filtren por su bucket y que no se acepte SVG. Arnés **76/76**. Migración aplicada en producción. De paso cayó un `any` que llevaba tiempo en `/contactanos`.

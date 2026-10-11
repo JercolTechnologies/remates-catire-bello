@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { useCasa } from "@/app/components/MarcaCasa"
 
 type SupportItem = {
   id: string
@@ -27,6 +28,9 @@ function buildHref(type: string, value: string) {
 }
 
 export default function ContactanosPage() {
+  // De quien son estos canales. En una casa licenciada, "escribenos" sin
+  // nombre se lee como la plataforma -- y es justo al reves. Ver ADR-052.
+  const casa = useCasa()
   const [items, setItems] = useState<SupportItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -44,7 +48,9 @@ export default function ContactanosPage() {
       if (err) {
         setError(err.message)
       } else {
-        setItems((data as any[])?.map((r) => ({ ...r })) ?? [])
+        // Era `(data as any[])?.map(r => ({...r}))`: un `any` y una copia que
+        // no servia para nada. La fila ya tiene la forma de SupportItem.
+        setItems((data ?? []) as SupportItem[])
       }
       setLoading(false)
     })()
@@ -65,11 +71,23 @@ export default function ContactanosPage() {
       <main className="min-h-screen bg-zinc-950 text-zinc-50 px-4 sm:px-6 lg:px-8 py-6">
         <div className="mx-auto w-full max-w-3xl">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold">Contáctanos</h1>
+            <h1 className="text-xl font-bold">Quejas, reclamos y sugerencias</h1>
           </div>
 
+          {/* QUIEN RESPONDE, CON NOMBRE. Es el descargo mas util que hay en
+              toda la aplicacion: el jugador que no ve su recarga tiene que
+              saber a quien escribirle, y no es a la plataforma. */}
           <p className="mt-2 text-sm text-zinc-300">
-            Escríbenos por los canales oficiales. Responderemos lo antes posible.
+            {casa ? (
+              <>
+                Esta casa la opera{" "}
+                <span className="font-semibold text-zinc-100">{casa.nombre}</span>, que es quien
+                recibe los depósitos, paga los retiros y responde por cualquier reclamo. Estos son
+                sus canales:
+              </>
+            ) : (
+              <>Escríbenos por los canales oficiales. Responderemos lo antes posible.</>
+            )}
           </p>
 
           {loading ? (
@@ -79,8 +97,12 @@ export default function ContactanosPage() {
               {error}
             </div>
           ) : items.length === 0 ? (
-            <div className="mt-4 rounded-xl bg-zinc-900/60 p-3 text-sm text-zinc-300">
-              No hay canales de soporte configurados.
+            <div className="mt-4 rounded-xl bg-amber-500/10 p-3 text-sm leading-snug text-amber-200 ring-1 ring-amber-500/20">
+              <div className="font-semibold">Esta casa todavía no ha publicado sus canales</div>
+              <div className="mt-1 text-amber-200/80">
+                {casa ? `Avisa a ${casa.nombre}` : "Avisa al administrador"} para que ponga su
+                correo o su WhatsApp. Mientras tanto no hay forma de contactarlos desde aquí.
+              </div>
             </div>
           ) : (
             <div className="mt-4 space-y-3">
