@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { HeroLogo } from "@/app/components/BrandLogo"
-import { PLATAFORMA } from "@/lib/marca"
+import { PortadaTitulo } from "@/app/components/BrandLogo"
 
 export default function Home() {
   return (
@@ -13,7 +13,7 @@ export default function Home() {
           Catire Bello" cuando la marca es "Remate Catire Bello", en singular.
           El h1 se queda para los lectores de pantalla y para el buscador, que
           sí necesitan un encabezado de verdad, y sale de lib/marca.ts. */}
-      <h1 className="sr-only">{PLATAFORMA.nombre}</h1>
+      <PortadaTitulo />
       <p className="mt-3 text-zinc-400 text-sm">
         Bienvenido a tu casa de remates digital.
       </p>

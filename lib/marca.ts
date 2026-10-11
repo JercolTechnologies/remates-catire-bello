@@ -101,22 +101,42 @@ export const PLATAFORMA: Marca = {
 }
 
 /**
- * La casa de ESTA instalacion. `null` = la instalacion es la de la plataforma
- * y no hay una segunda marca que pintar.
+ * LA JERARQUIA SE INVIRTIO EL 11/10/2026 (ADR-049).
  *
- * Para un licenciatario: { nombre: "Remate El Zuliano", logo: "/marca/casa.png" }
- * El logo es opcional: muchos no van a tener uno.
+ * El 09/10 la decision fue que la plataforma mandara siempre. Dos dias y una
+ * licencia real despues, Jota la cambio por dos motivos suyos: menos jugadores
+ * reclamandole a la plataforma por problemas de la casa, y un licenciatario
+ * mas contento viendo su propio nombre.
+ *
+ * La constante `CASA` ya no existe. La casa se lee de `ajustes_instalacion`
+ * (clave `casa_nombre`) en el servidor -- ver `lib/marcaCasa.ts` -- y llega a
+ * las pantallas por contexto. Por eso estas dos funciones RECIBEN la casa en
+ * vez de buscarla: asi siguen siendo puras y la dependencia se ve.
+ *
+ * `null` significa "esta instalacion es la de la plataforma", que es el caso
+ * de nuestra propia casa: ahi la casa y la plataforma son la misma cosa.
  */
-export const CASA: { nombre: string; logo?: string } | null = null
+export type Casa = { nombre: string; logo?: string } | null
 
-/** Lo que va en el pie. El año NO se escribe a mano: el `©2026` del pie
- *  llevaba clavado desde enero y en enero de 2027 habria mentido. */
-export function pieDePagina() {
-  return `${PLATAFORMA.nombre} ©${new Date().getFullYear()} Todos los derechos reservados. Desarrollado por Jercol Technologies.`
+/** Lo que va en el pie. AQUI es donde queda la referencia a la plataforma
+ *  cuando la cabecera pasa a ser de la casa (decision de Jota: "en el footer
+ *  ya se hacen las referencias").
+ *
+ *  El año NO se escribe a mano: el `©2026` llevaba clavado desde enero y en
+ *  enero de 2027 habria mentido. */
+export function pieDePagina(casa: Casa) {
+  const anio = new Date().getFullYear()
+  if (!casa) {
+    return `${PLATAFORMA.nombre} ©${anio} Todos los derechos reservados. Desarrollado por Jercol Technologies.`
+  }
+  return `${casa.nombre} ©${anio} · Funciona con ${PLATAFORMA.nombre}, de Jercol Technologies.`
 }
 
-/** El titulo de la pestaña y de las vistas previas. Si hay casa, va detras:
- *  la plataforma manda. */
-export function tituloDocumento() {
-  return CASA ? `${PLATAFORMA.nombre} · ${CASA.nombre}` : PLATAFORMA.nombre
+/** El titulo de la pestaña y de las vistas previas.
+ *
+ *  Con casa, va SOLO el nombre de la casa: es lo que el jugador guarda en
+ *  marcadores y lo que lee en la pestaña, y es su casa, no la nuestra. La
+ *  atribucion vive en el pie. */
+export function tituloDocumento(casa: Casa) {
+  return casa ? casa.nombre : PLATAFORMA.nombre
 }

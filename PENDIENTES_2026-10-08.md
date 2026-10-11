@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (48 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (49 decisiones) y en el arnés.
 
 **Estado del proyecto:** 75/75 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 47 migraciones, 48 ADRs.
+31 en `tests/aviso_puja.mjs`. 47 migraciones, 49 ADRs.
 
 ---
 
@@ -45,6 +45,7 @@ detalla aquí: está en `ADR.md` (48 decisiones) y en el arnés.
 | **`/admin/super/ajustes`**: el dueño pone sus datos de cobro y el nombre de su casa, con vista previa de lo que verá el jugador | ADR-047 |
 | **`/dashboard/recargar` deja de inventar**: lee de `datos_de_cobro()` y esconde el formulario si la casa no tiene dónde cobrar | ADR-047 |
 | **Documentos legales versionados e inmutables**, con registro de quién aceptó qué versión y cuándo | ADR-048, `20261011023500`, P75 |
+| **La marca de la casa manda donde la ve el jugador**; la plataforma, en el panel. `CASA` deja de ser constante y se lee de la base | ADR-049 |
 
 ---
 
@@ -141,11 +142,17 @@ Lo de la navegación y los anchos se cerró el 09/10 (ADR-040). Queda:
   pedirle el suyo para tener **el metal en vector**, pero no bloquea nada. Y si lo que
   molesta es el aspecto «IA», el culpable es el biselado 3D con destellos: la versión
   plana de estos SVG lo quita sin tocar el dibujo.
-- **La marca del licenciatario todavía es una constante.** `CASA` en `lib/marca.ts` está
-  en `null` y se edita a mano. El destino es `ajustes_instalacion`, que ya existe en la
-  base con tres claves y ya tiene lectura pública por lista blanca (`ajustes_publicos()`,
-  ADR-029): el día que se añadan las claves de marca, cambia la función de `lib/marca.ts`
-  y **ninguna pantalla se entera** — eso ya está cableado así (ADR-042). Está en 5.4.
+- ~~**La marca del licenciatario todavía es una constante.**~~ **Cerrado el 11/10**
+  (ADR-049). Sale de `ajustes_instalacion`, se lee en el servidor y baja por contexto. Y
+  la jerarquía se invirtió: **la casa manda donde la ve el jugador; la plataforma, en el
+  panel, donde la ve el dueño.** Se tocó en seis archivos y en ninguna pantalla — lo que
+  ADR-042 compró.
+- ⚠️ **Subir el logo de la casa, no pegar una URL.** `casa_logo_url` es un campo de texto.
+  Un dueño de remates tiene un PNG en el teléfono, no una URL. Con la casa ya dominante
+  en la pantalla del jugador esto dejó de ser un detalle: Supabase Storage, un bucket,
+  política de subida solo para super admin, y un control de archivo en
+  `/admin/super/ajustes`. Mientras tanto el respaldo es digno — el nombre bien
+  tipografiado — pero no es lo que se promete al enseñar el producto.
 - **El isotipo se usa en versión con degradado, no `-mono`.** Las piezas `-mono`
   (`currentColor`) existen y están listas, pero nadie las usa todavía. Son las que harán
   falta el día que un licenciatario quiera su color.
@@ -173,10 +180,8 @@ dinero de verdad. Todo va a `ajustes_instalacion`:
 - ~~⛔ **Datos bancarios de recarga.**~~ **Cerrado el 11/10** (ADR-047, `20261011011500`,
   P74). Viven en `ajustes_instalacion`, los pone el dueño desde `/admin/super/ajustes`, y
   si faltan la pantalla de recargar lo dice en vez de inventarlos.
-- **Nombre de la casa.** `CASA` en `lib/marca.ts` sigue siendo una constante. **La mitad
-  ya está hecha**: la clave `casa_nombre` existe, sale por `ajustes_publicos()` y la
-  pantalla de ajustes la guarda. Falta leerla — y eso toca `metadata` en el layout, que
-  es servidor, no cliente. Es un bloque corto pero de otra naturaleza.
+- ~~**Nombre de la casa.**~~ **Cerrado el 11/10** (ADR-049). Queda solo la subida del
+  logo, anotada en el 4.
 - **Quién responde por el dinero.** `/reglas` no lo dice. La marca que ve el jugador es
   la de la plataforma (decisión del 09/10), así que el jugador que pierda dinero va a
   reclamarle a la plataforma. Tiene que leer, con nombre y apellido, de quién es la casa.

@@ -41,7 +41,8 @@
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { PLATAFORMA, CASA } from "@/lib/marca"
+import { PLATAFORMA } from "@/lib/marca"
+import { useCasa } from "./MarcaCasa"
 import { ENLACES_CLIENTE } from "./enlacesCliente"
 import { useSesionCliente } from "./SesionCliente"
 
@@ -66,6 +67,7 @@ function bs(v: number) {
 
 export default function CabeceraCliente() {
   const pathname = usePathname()
+  const casa = useCasa()
   const { visible, usuario, saldo } = useSesionCliente()
 
   if (!visible) return null
@@ -75,26 +77,46 @@ export default function CabeceraCliente() {
   return (
     <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur">
       <div className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 py-2.5 sm:px-6 lg:px-8">
-        {/* La marca de la plataforma manda; la de la casa va debajo y mas
-            pequena. Ver lib/marca.ts. */}
+        {/* LA CASA MANDA AQUI (ADR-049, 11/10). Hasta el 11/10 mandaba la
+            plataforma y la casa iba debajo en gris. Se invirtio: esta cabecera
+            la ve el JUGADOR, y para el jugador el sitio es la casa de su
+            remate. La atribucion a la plataforma vive en el pie.
+
+            En el PANEL DE ADMIN sigue al reves, y a proposito: esa pantalla la
+            ve el licenciatario, que sabe de quien es el software y es a quien
+            se le vende.
+
+            Tres casos, y el tercero importa: casa con logo, casa SIN logo (que
+            van a ser la mayoria al principio) y sin casa. A una casa sin logo
+            NO se le pone el isotipo de la plataforma al lado del nombre: se
+            leeria como si ese fuera su logo. Se pinta el nombre solo, y
+            entonces si se ve tambien en movil, porque es lo unico que hay. */}
         <Link href="/remates" className="flex min-w-0 shrink-0 items-center gap-2.5" aria-label="Ir a remates">
-          <Image
-            src={PLATAFORMA.isotipo}
-            alt={PLATAFORMA.nombre}
-            width={36}
-            height={36}
-            priority
-            className="h-8 w-8 shrink-0 object-contain sm:h-9 sm:w-9"
-          />
-          <span className="hidden min-w-0 sm:block">
+          {casa?.logo ? (
+            /* `next/image` exige declarar los dominios remotos en
+               next.config.ts, y el logo de cada casa es una URL distinta que no
+               existe en tiempo de compilacion: un repositorio, N casas. Por eso
+               aqui va una etiqueta normal. */
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={casa.logo}
+              alt={casa.nombre}
+              className="h-8 w-8 shrink-0 object-contain sm:h-9 sm:w-9"
+            />
+          ) : !casa ? (
+            <Image
+              src={PLATAFORMA.isotipo}
+              alt={PLATAFORMA.nombre}
+              width={36}
+              height={36}
+              priority
+              className="h-8 w-8 shrink-0 object-contain sm:h-9 sm:w-9"
+            />
+          ) : null}
+          <span className={casa && !casa.logo ? "block min-w-0" : "hidden min-w-0 sm:block"}>
             <span className="block truncate text-sm font-semibold leading-tight text-oro">
-              {PLATAFORMA.corto}
+              {casa ? casa.nombre : PLATAFORMA.corto}
             </span>
-            {CASA ? (
-              <span className="block truncate text-[11px] leading-tight text-zinc-500">
-                {CASA.nombre}
-              </span>
-            ) : null}
           </span>
         </Link>
 

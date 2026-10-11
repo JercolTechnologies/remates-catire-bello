@@ -1268,3 +1268,44 @@ Jota planteó el mecanismo como una pantalla: que la casilla no se active hasta 
 **Y el contrato licenciatario↔Jercol no vive aquí.** Si se guardara en esta aplicación, el registro de que el licenciatario aceptó las condiciones quedaría **en la base de datos de él**, que él controla. Eso no es una prueba, es una cortesía. Ese contrato se firma fuera.
 
 **Consecuencias.** `P75`, ocho condiciones. La que da la medida es la séptima: tras aceptar no queda nada pendiente, y al publicar la v3 **vuelve a estarlo** — que es el único motivo por el que versionar sirve de algo. Y la tercera: publicar la v2 deja el texto y la fecha de la v1 idénticos. El censo de P47 suma cuatro funciones; el de P48, dos tablas con todos los verbos en blanco.
+
+---
+
+## ADR-049 · La casa manda donde la ve el jugador; la plataforma, donde la ve el dueño
+
+**Fecha.** 11 de octubre de 2026 *(solo frontend, sin migración)*
+
+**Contexto.** El 09/10 la decisión fue que la marca de la plataforma mandara siempre y la del licenciatario fuera secundaria y opcional. Dos días y una licencia real después, Jota la cambió, con dos motivos suyos: bajar el porcentaje de jugadores que reclaman a la plataforma por problemas de la casa, y que al licenciatario le sepa mejor ver su propio nombre.
+
+**El primero es exactamente el coste que se le nombró** al elegir franquicia: *«el día que uno no pague un retiro, el jugador no va a decir "la casa de fulano no me pagó", va a decir "Catire Bello no me pagó"»*. No es un cambio de opinión, es una respuesta al argumento.
+
+**Pero la marca compra menos de lo que parece, y conviene que quede escrito.** Un «funciona con» reduce las reclamaciones **mal dirigidas**; no desplaza la responsabilidad. Lo que la desplaza son los documentos — los términos nombrando a la casa, el aviso legal con los datos del licenciatario, `/reglas` diciendo quién debe el dinero. **El logo baja el ruido; los documentos bajan el riesgo** (ADR-048).
+
+**Y la palanca ya no era la marca.** El plan de strikes se apoyaba en «quitar el nombre». Desde que Jercol hospeda (SaaS, 11/10), la palanca real es que el despliegue y el dominio son suyos: un strike se ejecuta apagando el proyecto, no despintando un logo. Por eso bajar la marca propia **no cuesta poder**: la palanca débil ya se había cambiado por una fuerte unas horas antes.
+
+**Decisión: la jerarquía depende de QUIÉN mira la pantalla.**
+
+| | Antes | Ahora |
+|---|---|---|
+| Portada y cabecera del jugador | plataforma grande, casa en gris | **la casa** |
+| Título de la pestaña y `siteName` | `Plataforma · Casa` | **solo la casa** |
+| Pie | plataforma © | **`Casa ©año · Funciona con <plataforma>, de Jercol Technologies`** |
+| **Panel de admin** | plataforma arriba, casa debajo | **sin cambios** |
+
+El panel se queda como estaba **a propósito**: esa pantalla la ve el licenciatario, que sabe perfectamente de quién es el software y es a quien se le vende. Es el escaparate, no la tienda.
+
+**`CASA` deja de ser una constante.** Sale de `ajustes_instalacion` (clave `casa_nombre`), que ya existía desde ADR-047. Se lee **en el servidor** — `lib/marcaCasa.ts` — porque el título de la pestaña sale de `generateMetadata()`, que corre ahí: leerla en el cliente daría siempre el título de la plataforma y el nombre de la casa aparecería un parpadeo después. De ahí baja por contexto (`components/MarcaCasa.tsx`) a los componentes de cliente, que no piden nada: el mismo patrón de `SesionCliente` — lo que vale para toda la aplicación vive por encima de las pantallas (ADR-026).
+
+**Se lee con `fetch` plano, no con supabase-js, y eso es lo que mantiene el sitio estático.** `next: { revalidate: 300 }` mete el resultado en la caché de Next. **Medido en el build: las páginas siguen todas `○ (Static)`, ahora con `Revalidate 5m`.** Hacer asíncrono el layout raíz no convirtió nada en dinámico. Si la consulta falla, devuelve `null`, que significa «esta instalación es la de la plataforma» — el comportamiento de siempre. Una marca que no carga no tumba una página.
+
+**Tres decisiones que no son obvias:**
+
+1. **Una casa sin logo NO lleva el isotipo de la plataforma al lado del nombre.** Se leería como si ese símbolo fuera suyo. Se pinta el nombre solo — y entonces sí se ve también en móvil, porque es lo único que hay. Al principio **la mayoría de las casas van a estar en este caso**.
+2. **El logo de la casa va en `<img>`, no en `next/image`.** `next/image` exige declarar los dominios remotos en `next.config.ts`, y la URL del logo es distinta en cada instalación y no existe al compilar. Un repositorio, N casas: no hay lista blanca posible.
+3. **El `<h1>` oculto de la portada dice el nombre de la casa.** Para el buscador, ese sitio es el remate de ese licenciatario, no el nuestro.
+
+**El cableado del 09/10 pagó.** Invertir la jerarquía se tocó en seis archivos — `marca.ts`, `BrandLogo`, `CabeceraCliente`, `NavegacionAdmin`, `layout` y la portada — y en ninguna de las treinta pantallas. Eso es exactamente lo que ADR-042 compró.
+
+**Lo que NO cierra.** `casa_logo_url` sigue siendo un campo donde hay que **pegar una URL**, y un dueño de remates tiene un PNG en el teléfono. Con la casa ahora dominante, la subida de archivo pasó de detalle a necesaria: Supabase Storage, bucket, política de subida solo para super admin, y un control de archivo en `/admin/super/ajustes`. Queda en PENDIENTES.
+
+**Consecuencias.** No hay prueba de arnés: lo que cambia es qué marca lee una persona en pantalla, y eso se verifica abriendo la pantalla. `tsc --noEmit` sin salida, `eslint` sobre los ocho archivos sin un solo problema, y el build con las rutas intactas.

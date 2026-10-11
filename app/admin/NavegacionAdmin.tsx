@@ -41,7 +41,8 @@ import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 import { useCajaEnVivo } from "./CajaEnVivo"
-import { PLATAFORMA, CASA } from "@/lib/marca"
+import { PLATAFORMA } from "@/lib/marca"
+import { useCasa } from "@/app/components/MarcaCasa"
 
 type Punto = {
   href: string
@@ -106,6 +107,10 @@ function activo(pathname: string, p: Punto) {
 
 export default function NavegacionAdmin() {
   const pathname = usePathname()
+  // Aqui la plataforma SIGUE mandando y la casa va debajo (ADR-049). Esta
+  // pantalla la ve el licenciatario, no el jugador: es el escaparate del
+  // software, y es a el a quien se le vende.
+  const casa = useCasa()
   const { recargasPendientes, retirosPendientes, activo: esAdmin } = useCajaEnVivo()
   const [abierto, setAbierto] = useState(false)
 
@@ -143,7 +148,7 @@ export default function NavegacionAdmin() {
         {/* La marca del licenciatario va DEBAJO y mas pequena: la que destaca
             es la de la plataforma. Ver lib/marca.ts. */}
         <span className="block truncate text-[11px] text-zinc-500">
-          {CASA ? CASA.nombre : "Panel de la casa"}
+          {casa ? casa.nombre : "Panel de la casa"}
         </span>
       </span>
     </Link>

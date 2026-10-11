@@ -8,6 +8,8 @@ import NavegacionCliente from "./components/NavegacionCliente";
 import { RematesEnVivo } from "./components/RematesEnVivo";
 import { SesionCliente } from "./components/SesionCliente";
 import { pieDePagina, tituloDocumento, PLATAFORMA } from "@/lib/marca";
+import { casaDeLaInstalacion } from "@/lib/marcaCasa";
+import { ProveedorMarcaCasa } from "./components/MarcaCasa";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,28 +31,46 @@ const geistMono = Geist_Mono({
 // apunte a una URL absoluta. Sin el, Next avisa en el build y las redes
 // sociales se quedan sin imagen. Sale de la variable que Vercel pone sola, con
 // respaldo a localhost para que `next dev` no se queje.
-export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITIO ??
-      (process.env.VERCEL_PROJECT_PRODUCTION_URL
-        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-        : "http://localhost:3000")
-  ),
-  title: tituloDocumento(),
-  description: "Remates hipicos en vivo: puja por un caballo y llevate el pozo si gana la carrera.",
-  openGraph: {
-    title: tituloDocumento(),
-    description: "Remates hipicos en vivo: puja por un caballo y llevate el pozo si gana la carrera.",
-    siteName: PLATAFORMA.nombre,
-    type: "website",
-  },
-};
+const DESCRIPCION =
+  "Remates hipicos en vivo: puja por un caballo y llevate el pozo si gana la carrera.";
 
-export default function RootLayout({
+// El titulo depende de QUE CASA es esta instalacion, y eso vive en la base.
+// Por eso deja de ser una constante: `generateMetadata` corre en el servidor y
+// puede leerla. La lectura esta cacheada cinco minutos (lib/marcaCasa.ts), asi
+// que esto no convierte cada visita en una consulta.
+export async function generateMetadata(): Promise<Metadata> {
+  const casa = await casaDeLaInstalacion();
+  const titulo = tituloDocumento(casa);
+
+  return {
+    metadataBase: new URL(
+      process.env.NEXT_PUBLIC_SITIO ??
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL
+          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+          : "http://localhost:3000")
+    ),
+    title: titulo,
+    description: DESCRIPCION,
+    openGraph: {
+      title: titulo,
+      description: DESCRIPCION,
+      // `siteName` es el nombre del SITIO que comparte el enlace, y para el
+      // jugador ese sitio es su casa, no la plataforma.
+      siteName: casa ? casa.nombre : PLATAFORMA.nombre,
+      type: "website",
+    },
+  };
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Una sola lectura para toda la aplicacion: el titulo de arriba, el pie de
+  // abajo y las cabeceras de cliente y de admin salen de aqui. Cacheada.
+  const casa = await casaDeLaInstalacion();
+
   return (
     <html lang="en">
       <body
@@ -63,6 +83,9 @@ export default function RootLayout({
         {/* Y una sola suscripcion al canal de la coleccion de remates, que
             alimenta la lista publica, el contador del menu y la lista del
             admin. Ver components/RematesEnVivo.tsx */}
+        {/* La marca de la casa, resuelta en el servidor y repartida por
+            contexto. Ver lib/marcaCasa.ts y components/MarcaCasa.tsx */}
+        <ProveedorMarcaCasa valor={casa}>
         <RematesEnVivo>
         {/* Quien eres y cuanto tienes, preguntado UNA vez para la cabecera y
             la barra inferior. Ver components/SesionCliente.tsx */}
@@ -80,7 +103,7 @@ export default function RootLayout({
           <footer className="py-4 text-center text-xs text-zinc-400">
             {/* El año lo calcula lib/marca.ts. Estuvo clavado a mano como
                 "©2026" desde enero, y en enero de 2027 habria mentido. */}
-            {pieDePagina()}
+            {pieDePagina(casa)}
           </footer>
           {/* El menu de cliente en movil, una sola vez para toda la
               aplicacion. Ver components/NavegacionCliente.tsx */}
@@ -88,6 +111,7 @@ export default function RootLayout({
         </div>
         </SesionCliente>
         </RematesEnVivo>
+        </ProveedorMarcaCasa>
       </body>
     </html>
   );

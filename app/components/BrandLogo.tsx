@@ -1,3 +1,5 @@
+"use client"
+
 // ===========================================================================
 //  components/BrandLogo.tsx  -  LAS DOS PIEZAS DE MARCA SUELTAS
 //
@@ -27,6 +29,7 @@
 import Image from "next/image"
 import Link from "next/link"
 import { PLATAFORMA } from "@/lib/marca"
+import { useCasa } from "./MarcaCasa"
 
 type LogoProps = {
   href?: string
@@ -34,6 +37,29 @@ type LogoProps = {
 
 /** El conjunto apilado: simbolo y nombre. Portada y login. */
 export function HeroLogo({ href = "/remates" }: LogoProps) {
+  // La portada y las pantallas de entrada las ve el JUGADOR: su casa manda
+  // (ADR-049). Sin casa, la instalacion es la nuestra y se pinta la nuestra.
+  const casa = useCasa()
+
+  if (casa) {
+    return (
+      <Link href={href} aria-label={casa.nombre} className="mx-auto block w-fit text-center">
+        {casa.logo ? (
+          /* URL distinta por instalacion: no se puede declarar en
+             next.config.ts en tiempo de compilacion. Ver CabeceraCliente. */
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={casa.logo} alt={casa.nombre} className="mx-auto h-auto w-[180px] object-contain sm:w-[220px]" />
+        ) : (
+          // Sin logo, el nombre ES el logo. Mejor un nombre bien puesto que el
+          // simbolo de otra marca haciendo de suplente.
+          <span className="block text-2xl font-bold tracking-tight text-oro sm:text-3xl">
+            {casa.nombre}
+          </span>
+        )}
+      </Link>
+    )
+  }
+
   return (
     <Link href={href} aria-label={PLATAFORMA.nombre} className="mx-auto block w-fit">
       <Image
@@ -46,6 +72,16 @@ export function HeroLogo({ href = "/remates" }: LogoProps) {
       />
     </Link>
   )
+}
+
+/** El encabezado de la portada, para lectores de pantalla y buscadores.
+ *
+ *  El nombre visible ya esta dentro del logo; esto es el <h1> de verdad, que
+ *  una pagina necesita aunque no se vea. Dice el nombre de LA CASA cuando la
+ *  hay: para el buscador, este sitio es el remate de ese licenciatario. */
+export function PortadaTitulo() {
+  const casa = useCasa()
+  return <h1 className="sr-only">{casa ? casa.nombre : PLATAFORMA.nombre}</h1>
 }
 
 /** Solo el simbolo, arriba a la derecha. Queda en las pantallas de
