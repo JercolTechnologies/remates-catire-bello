@@ -1191,6 +1191,10 @@ Y el mismo hecho que pareció un síntoma resultó ser la prueba que cerró el c
 
 **Decisión.** Enlace explícito a `/register` dentro del aviso ámbar de `/admin/login`, condicionado a `fundada === false`. En una casa con dueño ese aviso no se pinta, y mandar administradores al registro sería un error distinto.
 
-**Lo que NO se tocó, y por qué.** El mensaje crudo de Supabase sigue mostrándose. `Invalid login credentials` suena a contraseña mal escrita cuando lo que pasa es que no hay cuenta, pero traducirlo aquí pondría texto de la base en el frontend (ADR-015) y es una decisión aparte. Queda anotado en PENDIENTES.
+**Y el mensaje deja de mentir.** `Invalid login credentials` suena a contraseña mal escrita cuando lo que pasa es que no hay cuenta. `mensajeDeEntrada()` traduce los tres códigos que importan —`invalid_credentials`, `email_not_confirmed`, `over_request_rate_limit`— y en el primero dice algo distinto según `fundada`: en una casa sin dueño nombra la posibilidad de que la cuenta no exista todavía. Lo que no reconoce se muestra tal cual: un mensaje en inglés es malo, tragarse el error es peor.
+
+**Esto no choca con el ADR-015, y conviene decir por qué, porque al principio pensé que sí.** Lo que esa regla protege son los mensajes de **nuestra** base —los `raise exception` de `fundar_super_admin`, ya escritos en castellano y para una persona, que por eso se muestran crudos (ADR-045)—. Supabase Auth no es nuestra base y sus textos no los escribimos nosotros: aquí no hay un segundo sitio donde mantener el mismo texto, hay un texto ajeno que traducir. Son cosas distintas.
+
+**Se decide por `code`, nunca por el texto.** `AuthError.code` está tipado como `ErrorCode` en `@supabase/auth-js` 2.87.1 —`'invalid_credentials'` y `'email_not_confirmed'` están en esa unión—; el texto del mensaje no es contrato de nada y cambia entre versiones.
 
 **Consecuencias.** No hay prueba de arnés que cubra esto: lo que falla es la ruta que una persona encuentra, y eso se verifica abriendo la pantalla. `tsc --noEmit` y `eslint` en verde.

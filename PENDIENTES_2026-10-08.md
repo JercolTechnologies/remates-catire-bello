@@ -39,6 +39,7 @@ detalla aquí: está en `ADR.md` (46 decisiones) y en el arnés.
 | **`fundar_super_admin`**: el licenciatario funda su propia casa; Jercol deja de entrar a la base del cliente | ADR-045, `20261010193000`, P73 → **cierra el 5.3** |
 | **`AvisoFundar`**: una instalación nueva ya sabe decirle a su dueño cómo empezar | ADR-045 |
 | **El fundador ya encuentra el registro**: `/admin/login` enlaza a `/register` cuando la casa no tiene dueño — bloqueó la primera instalación real | ADR-046 |
+| **Los errores de entrada dejan de ser los de Supabase en inglés**: `mensajeDeEntrada()`, por `code` y no por texto | ADR-046 |
 
 ---
 
@@ -109,15 +110,6 @@ WhatsApp y Telegram**; y `NOTIFY_EMAIL_TO` como lista desde los ajustes de insta
 ## 4 · Interfaz
 
 Lo de la navegación y los anchos se cerró el 09/10 (ADR-040). Queda:
-
-- **`Invalid login credentials` se muestra crudo en `/admin/login`.** Es el texto de
-  Supabase y suena a contraseña mal escrita, pero en una casa sin fundar lo que pasa
-  es que **no hay cuenta**: `auth.users` está vacía. Eso bloqueó la primera
-  instalación real el 11/10 (ADR-046). El enlace al registro ya está puesto, así que
-  el camino existe; lo que queda es el mensaje. Y no es gratis: traducirlo en el
-  frontend pone en pantalla texto que decide la base (ADR-015). La salida limpia sería
-  distinguir en el cliente el caso «no hay sesión y la casa no está fundada» antes de
-  repetir el error de Supabase.
 
 - **Un intercambio de números correcto se ve igual que uno que no hizo nada.**
   Al guardar, la pantalla recarga los caballos con `.order("numero")`, así que la

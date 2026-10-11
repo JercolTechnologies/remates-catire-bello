@@ -155,6 +155,34 @@ Al 10/10/2026 la lista completa es: `NEXT_PUBLIC_SUPABASE_URL`,
 > tu máquina apunta a **tu** producción y no tiene nada que ver con la
 > instalación del cliente: las suyas se ponen **solo** en su panel de Vercel.
 
+### 3.1 · Las URLs de Supabase Auth — el paso que rompe los correos
+
+**No es opcional, y no avisa cuando está mal.** Supabase deja el *Site URL* en
+`http://localhost:3000` por omisión. Si se queda así, los correos de
+**confirmar cuenta** y **recuperar contraseña** llevan enlaces a `localhost`:
+no fallan — llegan, y no funcionan para nadie.
+
+En el proyecto de Supabase **del cliente** → **Authentication** → **URL
+Configuration**:
+
+| Campo | Valor |
+|---|---|
+| **Site URL** | `https://<su-dominio>` — el definitivo, no el de pruebas |
+| **Redirect URLs** | `https://<su-dominio>/**` |
+
+La aplicación pide los retornos con `window.location.origin` —`/auth/callback`
+al registrarse, `/auth/reset` al recuperar contraseña—, así que se adapta sola
+al dominio por el que entró la persona. **Siempre que ese dominio esté en
+Redirect URLs**: si no está, Supabase lo ignora y cae al *Site URL*.
+
+> **Si el dominio cambia después** —renombrar el proyecto de Vercel, o pasar de
+> `*.vercel.app` a un dominio propio— **hay que volver aquí**. Es lo primero que
+> se olvida, y el síntoma no aparece hasta que alguien intenta recuperar su
+> contraseña, días después.
+
+**Comprobación:** registra una cuenta de prueba y mira el enlace del correo. Si
+empieza por `localhost`, este paso está sin hacer.
+
 ---
 
 ## 4. El licenciatario se registra

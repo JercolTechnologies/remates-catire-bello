@@ -34,6 +34,40 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 
+/**
+ * POR QUE ESTO EXISTE (11/10/2026, ADR-046)
+ *
+ * Los errores de Supabase Auth llegan en ingles y escritos para quien integra,
+ * no para quien entra. `invalid_credentials` es el peor de todos justo aqui:
+ * suena a contrasena mal escrita cuando en una casa sin fundar lo normal es
+ * que la cuenta todavia NO EXISTA. Eso bloqueo la primera instalacion real.
+ *
+ * NO choca con el ADR-015. Lo que esa regla protege son los mensajes de
+ * NUESTRA base -- los `raise exception` de `fundar_super_admin`, escritos ya en
+ * castellano y para una persona, que por eso se muestran crudos. Supabase Auth
+ * no es nuestra base y sus textos no los escribimos nosotros: aqui no hay un
+ * segundo sitio donde mantener el mismo texto, hay un texto ajeno que traducir.
+ *
+ * SE DECIDE POR `code`, NO POR EL TEXTO. `AuthError.code` esta tipado como
+ * `ErrorCode` en @supabase/auth-js; el texto del mensaje no es contrato de
+ * nada y cambia entre versiones. Lo que no reconocemos se muestra tal cual:
+ * un mensaje en ingles es malo, pero tragarse el error es peor.
+ */
+function mensajeDeEntrada(codigo: string | undefined, fundada: boolean | null): string | null {
+  if (codigo === "invalid_credentials") {
+    return fundada === false
+      ? "No pudimos entrar con esos datos. Si ya tienes cuenta, revisa el correo y la contraseña. Si todavía no la has creado, créala con el enlace de arriba usando el correo designado, y vuelve aquí."
+      : "Correo o contraseña incorrectos."
+  }
+  if (codigo === "email_not_confirmed") {
+    return "Tu cuenta existe, pero falta confirmar el correo. Abre el enlace que te enviamos y vuelve a entrar."
+  }
+  if (codigo === "over_request_rate_limit") {
+    return "Demasiados intentos seguidos. Espera un momento y vuelve a probar."
+  }
+  return null
+}
+
 export default function AdminLoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState("")
@@ -75,7 +109,7 @@ export default function AdminLoginPage() {
 
     if (loginErr) {
       setLoading(false)
-      return setError(loginErr.message)
+      return setError(mensajeDeEntrada(loginErr.code, fundada) ?? loginErr.message)
     }
 
     const userId = data.user?.id
