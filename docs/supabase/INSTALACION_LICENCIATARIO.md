@@ -290,9 +290,26 @@ select clave, valor, descripcion from public.ajustes_instalacion order by clave;
 | `minimo_precio_salida` | 100 | precio de salida mínimo de un caballo |
 | `pct_apostado_para_retirar` | 50 | % de lo recargado que hay que apostar antes de poder retirar; en `0` la regla no aplica |
 
-Se cambian desde la base (`update public.ajustes_instalacion set valor = '...'
-where clave = '...'`) hasta que exista la pantalla de ajustes, que está en
-pendientes.
+Estos tres se cambian **desde la base** (`update public.ajustes_instalacion set
+valor = '...' where clave = '...'`), y a propósito: la base valida contra ellos,
+y `guardar_ajustes()` los rechaza si alguien los intenta cambiar desde la
+aplicación (ADR-047).
+
+### 6.1 · Lo que pone él, no tú
+
+**Los datos de cobro y el nombre de la casa NO los configuras tú.** Desde el
+11/10/2026 el dueño los pone en **`/admin/super/ajustes`**, en su propio panel,
+nada más fundar. Son nueve claves que nacen vacías: `casa_nombre`,
+`casa_logo_url`, `pago_titular`, `pago_documento`, `pago_movil_banco`,
+`pago_movil_telefono`, `pago_transf_banco`, `pago_transf_tipo` y
+`pago_transf_numero`.
+
+> **No las siembres con datos de ejemplo.** Una casa que arranca con la cuenta
+> de otro cobra para otro hasta que alguien se da cuenta. Vacías, la pantalla de
+> recargar avisa al jugador y esconde el formulario; con datos de relleno, no.
+
+Mientras estén vacías sus jugadores **no pueden recargar**, así que es lo primero
+que tiene que hacer. Díselo al entregar.
 
 **Si cambias `pct_apostado_para_retirar`, hay que cambiar también el texto de
 `/reglas`.** Esa página le promete al jugador un porcentaje concreto, y una

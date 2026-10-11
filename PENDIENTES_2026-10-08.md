@@ -42,6 +42,8 @@ detalla aquí: está en `ADR.md` (47 decisiones) y en el arnés.
 | **Los errores de entrada dejan de ser los de Supabase en inglés**: `mensajeDeEntrada()`, por `code` y no por texto | ADR-046 |
 | **Los datos de cobro salen del código**: nueve claves por instalación, `datos_de_cobro()` solo con sesión, y escribir deja asiento | ADR-047, `20261011011500`, P74 |
 | Se cierra el `UPDATE` directo sobre `ajustes_instalacion`: todo pasa por `guardar_ajustes()` | ADR-047, P74 |
+| **`/admin/super/ajustes`**: el dueño pone sus datos de cobro y el nombre de su casa, con vista previa de lo que verá el jugador | ADR-047 |
+| **`/dashboard/recargar` deja de inventar**: lee de `datos_de_cobro()` y esconde el formulario si la casa no tiene dónde cobrar | ADR-047 |
 
 ---
 
@@ -167,10 +169,13 @@ tiene transacciones autónomas. **Decisión de Jota, diferida.**
 Es el bloque que queda antes de poder entregarle una instalación a alguien que cobre
 dinero de verdad. Todo va a `ajustes_instalacion`:
 
-- ⛔ **Datos bancarios de recarga.** Escritos a mano en `app/dashboard/recargar/page.tsx`.
-  **Los jugadores del licenciatario pagarían a la cuenta que esté ahí.** Es el bloqueante.
-- **Nombre de la casa.** `CASA` en `lib/marca.ts` es una constante: para que ponga su
-  nombre hay que editar código y desplegar, lo que rompe «un repo, N clientes».
+- ~~⛔ **Datos bancarios de recarga.**~~ **Cerrado el 11/10** (ADR-047, `20261011011500`,
+  P74). Viven en `ajustes_instalacion`, los pone el dueño desde `/admin/super/ajustes`, y
+  si faltan la pantalla de recargar lo dice en vez de inventarlos.
+- **Nombre de la casa.** `CASA` en `lib/marca.ts` sigue siendo una constante. **La mitad
+  ya está hecha**: la clave `casa_nombre` existe, sale por `ajustes_publicos()` y la
+  pantalla de ajustes la guarda. Falta leerla — y eso toca `metadata` en el layout, que
+  es servidor, no cliente. Es un bloque corto pero de otra naturaleza.
 - **Quién responde por el dinero.** `/reglas` no lo dice. La marca que ve el jugador es
   la de la plataforma (decisión del 09/10), así que el jugador que pierda dinero va a
   reclamarle a la plataforma. Tiene que leer, con nombre y apellido, de quién es la casa.

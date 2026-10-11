@@ -18,6 +18,50 @@ type DepositRow = {
   created_at: string | null
 }
 
+// ===========================================================================
+//  DONDE DEPOSITA EL JUGADOR
+//
+//  EL DEFECTO QUE ARREGLA (11/10/2026, ADR-047). El banco, el telefono de Pago
+//  Movil, la cedula y el numero de cuenta estaban escritos aqui abajo, en el
+//  HTML. Un repositorio, una rama, dos despliegues: produccion y la primera
+//  licencia mandaban a sus jugadores A LA MISMA CUENTA. Es la pantalla que le
+//  dice a una persona donde poner su dinero.
+//
+//  Ahora salen de `datos_de_cobro()`, que es una lista blanca sobre
+//  `ajustes_instalacion` y solo responde a quien tiene sesion -- un visitante
+//  sin cuenta no deposita.
+//
+//  Y SI FALTAN, SE DICE. Una casa recien instalada no tiene datos de cobro.
+//  Antes se inventaban (los de otro); ahora la pantalla avisa y esconde el
+//  formulario. Ensenar un formulario de "ya pague" cuando no hay donde pagar
+//  solo produce solicitudes que nadie puede aprobar.
+// ===========================================================================
+type Cobro = {
+  titular: string
+  documento: string
+  movilBanco: string
+  movilTelefono: string
+  transfBanco: string
+  transfTipo: string
+  transfNumero: string
+}
+
+const COBRO_VACIO: Cobro = {
+  titular: "", documento: "",
+  movilBanco: "", movilTelefono: "",
+  transfBanco: "", transfTipo: "", transfNumero: "",
+}
+
+function hayPagoMovil(c: Cobro) { return !!(c.movilBanco && c.movilTelefono) }
+function hayTransferencia(c: Cobro) { return !!(c.transfBanco && c.transfNumero) }
+
+// Se puede depositar si hay titular, documento y AL MENOS un metodo completo.
+// Medio metodo no sirve: un banco sin numero de cuenta no es un sitio donde
+// poner dinero.
+function sePuedeDepositar(c: Cobro) {
+  return !!(c.titular && c.documento) && (hayPagoMovil(c) || hayTransferencia(c))
+}
+
 function formatMoney(v: string | number) {
   const n = typeof v === "string" ? Number(v) : v
   if (!Number.isFinite(n)) return String(v)
@@ -44,6 +88,7 @@ export default function RecargarPage() {
   })
 
   const [items, setItems] = useState<DepositRow[]>([])
+  const [cobro, setCobro] = useState<Cobro>(COBRO_VACIO)
 
   const metodoLabel = useMemo(() => {
     if (metodo === "pago_movil") return "Pago Móvil"
@@ -76,12 +121,45 @@ export default function RecargarPage() {
 
     if (listErr) setError(listErr.message)
     setItems((data ?? []) as DepositRow[])
+
+    // Los datos de cobro de ESTA casa. Si la llamada falla no se rompe la
+    // pantalla: se queda vacia y el aviso de "todavia no hay donde depositar"
+    // dice la verdad -- el jugador no tiene los datos, sea por lo que sea.
+    const { data: aj, error: cobroErr } = await supabase.rpc("datos_de_cobro")
+    if (cobroErr) {
+      console.warn("[cobro]", cobroErr.message)
+      setCobro(COBRO_VACIO)
+    } else {
+      const m: Record<string, string> = {}
+      for (const fila of (aj ?? []) as { clave: string; valor: string }[]) {
+        m[fila.clave] = (fila.valor ?? "").trim()
+      }
+      setCobro({
+        titular:       m.pago_titular        ?? "",
+        documento:     m.pago_documento      ?? "",
+        movilBanco:    m.pago_movil_banco    ?? "",
+        movilTelefono: m.pago_movil_telefono ?? "",
+        transfBanco:   m.pago_transf_banco   ?? "",
+        transfTipo:    m.pago_transf_tipo    ?? "",
+        transfNumero:  m.pago_transf_numero  ?? "",
+      })
+    }
+
     setLoading(false)
   }
 
   useEffect(() => {
+    // `load()` escribe varios estados a la vez (sesion, lista de recargas y
+    // datos de cobro) y es una carga inicial, no una sincronizacion con un
+    // sistema externo. La alternativa limpia -- sacar cada consulta a una
+    // funcion pura que devuelva su valor, como en SesionCliente.tsx -- aqui
+    // serian cinco, y no compensa por una carga que corre una sola vez.
+    //
+    // La supresion anterior nombraba `exhaustive-deps`, que ya no salta: la
+    // regla que de verdad se dispara es esta. Una supresion que apunta a la
+    // regla equivocada no protege de nada y entrena a ignorarlas.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function onSubmit(e: FormEvent) {
@@ -167,22 +245,45 @@ export default function RecargarPage() {
           recarga si todo está correcto.
         </p>
 
-        <div className="mt-4 rounded-2xl bg-gray-900/60 p-4 ring-1 ring-white/10 text-sm text-gray-200 space-y-3">
-          <div>
-            <div className="font-semibold">Pago Móvil</div>
-            <div className="text-gray-300">Banco: Banesco</div>
-            <div className="text-gray-300">Teléfono: 04143403972</div>
-            <div className="text-gray-300">Cédula: 17454950</div>
+        {sePuedeDepositar(cobro) ? (
+          <div className="mt-4 rounded-2xl bg-gray-900/60 p-4 ring-1 ring-white/10 text-sm text-gray-200 space-y-3">
+            {hayPagoMovil(cobro) ? (
+              <div>
+                <div className="font-semibold">Pago Móvil</div>
+                <div className="text-gray-300">Banco: {cobro.movilBanco}</div>
+                <div className="text-gray-300">Teléfono: {cobro.movilTelefono}</div>
+                <div className="text-gray-300">Cédula: {cobro.documento}</div>
+              </div>
+            ) : null}
+            {hayTransferencia(cobro) ? (
+              <div>
+                <div className="font-semibold">Transferencia bancaria</div>
+                <div className="text-gray-300">Banco: {cobro.transfBanco}</div>
+                {cobro.transfTipo ? (
+                  <div className="text-gray-300">Cuenta: {cobro.transfTipo}</div>
+                ) : null}
+                <div className="text-gray-300">N° de cuenta: {cobro.transfNumero}</div>
+                <div className="text-gray-300">Cédula: {cobro.documento}</div>
+              </div>
+            ) : null}
+            <div className="border-t border-white/10 pt-3 text-gray-300">
+              A nombre de: <span className="text-gray-100">{cobro.titular}</span>
+            </div>
           </div>
-          <div>
-            <div className="font-semibold">Transferencia bancaria</div>
-            <div className="text-gray-300">Banco: Banesco</div>
-            <div className="text-gray-300">Cuenta: Corriente</div>
-            <div className="text-gray-300">N° de cuenta: 0134-0789-43-7891019197</div>
-            <div className="text-gray-300">Cédula: 17454950</div>
+        ) : (
+          <div className="mt-4 rounded-2xl bg-amber-500/10 p-4 text-sm leading-snug text-amber-200 ring-1 ring-amber-500/20">
+            <div className="font-semibold">Esta casa todavía no tiene datos de cobro</div>
+            <div className="mt-1 text-amber-200/80">
+              No hay dónde depositar, así que no tiene sentido que envíes una solicitud. Avisa al
+              administrador de la casa: los pone él, desde su panel, en un minuto.
+            </div>
           </div>
-        </div>
+        )}
 
+        {/* Sin datos de cobro no se ensena el formulario. Un "ya pague" sin
+            sitio donde pagar solo produce solicitudes que nadie puede aprobar,
+            y una discusion despues. */}
+        {sePuedeDepositar(cobro) ? (
         <form onSubmit={onSubmit} className="mt-5 space-y-3 rounded-2xl bg-gray-900/60 p-4 ring-1 ring-white/10">
           <div>
             <label className="text-sm text-gray-200">Monto (Bs)</label>
@@ -255,6 +356,7 @@ export default function RecargarPage() {
             {saving ? "Enviando..." : "Enviar solicitud"}
           </button>
         </form>
+        ) : null}
 
         <div className="mt-6">
           <h2 className="text-base font-semibold">Tus últimas solicitudes</h2>

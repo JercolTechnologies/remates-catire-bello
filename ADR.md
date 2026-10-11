@@ -1231,4 +1231,10 @@ No es un defecto cosmético: es la pantalla que le dice a una persona dónde pon
 
 **Consecuencias.** `P74`, ocho condiciones, validadas contra un Postgres 16 antes de escribir la prueba definitiva. La que da la medida es la séptima: `minimo_incremento` se rechaza aunque lo pida un super admin. Y la octava: la tabla ya no acepta `UPDATE` de `authenticated`, pero el `SELECT` sigue. El censo de P47 suma `datos_de_cobro` y `guardar_ajustes`.
 
-**Lo que esto NO cierra todavía.** La pantalla `/dashboard/recargar` sigue con los datos en el HTML hasta el bloque de frontend; esta migración prepara la base y no rompe nada mientras tanto, porque nada en la aplicación escribía esa tabla. Falta `/admin/super/ajustes`, que es donde el dueño pone los suyos sin que nadie entre a SQL — el requisito de verdad del modelo SaaS.
+**El frontend, el mismo día.** `/admin/super/ajustes` es donde el dueño pone los suyos sin que nadie entre a SQL — el requisito de verdad del modelo SaaS, porque el cliente de un SaaS no abre un editor de SQL ni le pide a su proveedor que le toque la base. Una sola lista de campos manda sobre el formulario, la carga y el guardado: añadir una clave mañana son dos líneas, no cuatro sitios que se desincronizan.
+
+**La vista previa de esa pantalla no es adorno.** El dueño escribe los datos y los ve **como los verá su jugador**. Un número de cuenta mal copiado no lo descubre quien lo escribió: lo descubre, días después, alguien que mandó su dinero a otro sitio.
+
+**Y `/dashboard/recargar` dice la verdad cuando no hay datos.** Antes se los inventaba — los de otra casa. Ahora, si falta el titular, el documento o un método completo, enseña una franja ámbar y **esconde el formulario**: un «ya pagué» sin sitio donde pagar solo produce solicitudes que nadie puede aprobar, y una discusión después. Medio método tampoco cuenta: un banco sin número de cuenta no es un sitio donde poner dinero.
+
+**Lo que NO cierra.** `CASA` en `lib/marca.ts` sigue siendo una constante. La clave `casa_nombre` ya existe y la pantalla ya la guarda, pero leerla toca `metadata` del layout, que es servidor, y es un cambio de otra naturaleza. Queda en PENDIENTES.
