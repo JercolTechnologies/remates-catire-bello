@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (49 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (50 decisiones) y en el arnés.
 
 **Estado del proyecto:** 75/75 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 47 migraciones, 49 ADRs.
+31 en `tests/aviso_puja.mjs`. 47 migraciones, 50 ADRs.
 
 ---
 
@@ -46,6 +46,7 @@ detalla aquí: está en `ADR.md` (49 decisiones) y en el arnés.
 | **`/dashboard/recargar` deja de inventar**: lee de `datos_de_cobro()` y esconde el formulario si la casa no tiene dónde cobrar | ADR-047 |
 | **Documentos legales versionados e inmutables**, con registro de quién aceptó qué versión y cuándo | ADR-048, `20261011023500`, P75 |
 | **La marca de la casa manda donde la ve el jugador**; la plataforma, en el panel. `CASA` deja de ser constante y se lee de la base | ADR-049 |
+| **La caché de la marca se tira al guardar**: cambiar el nombre de la casa se ve al momento, no «dentro de un rato» | ADR-050 |
 
 ---
 

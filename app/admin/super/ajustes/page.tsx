@@ -152,6 +152,19 @@ export default function AjustesCasaPage() {
 
       const n = typeof data === "number" ? data : 0
       setGuardado({ ...valores })
+
+      // La portada, la cabecera y el titulo de la pestana salen de una lectura
+      // CACHEADA en el servidor (lib/marcaCasa.ts). Sin este aviso, el dueno
+      // guarda su nombre y no ve cambiar nada durante minutos -- le paso al
+      // primer licenciatario el 11/10. Si falla, no se rompe el guardado: lo
+      // que se pierde es la inmediatez, y a los cinco minutos se arregla solo.
+      if (n > 0) {
+        try {
+          await fetch("/api/marca/revalidar", { method: "POST" })
+        } catch (e) {
+          console.warn("[marca] no se pudo refrescar la cache:", e)
+        }
+      }
       setOk(n === 0 ? "No habia nada que cambiar." : n === 1 ? "Guardado: 1 cambio." : `Guardado: ${n} cambios.`)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "No se pudo guardar")

@@ -36,6 +36,12 @@ export type MarcaCasa = { nombre: string; logo?: string } | null
  *  tarde un rato en verse es barato comparado con consultar en cada visita. */
 const SEGUNDOS_CACHE = 300
 
+/** La etiqueta con la que se tira esta cache a mano desde
+ *  `/api/marca/revalidar` cuando el dueno guarda sus datos. Sin esto, cambiar
+ *  el nombre de la casa no se ve hasta que caducan los cinco minutos -- y con
+ *  stale-while-revalidate, hasta la visita de DESPUES. Medido el 11/10. */
+export const ETIQUETA_MARCA_CASA = "marca-casa"
+
 export async function casaDeLaInstalacion(): Promise<MarcaCasa> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -50,7 +56,7 @@ export async function casaDeLaInstalacion(): Promise<MarcaCasa> {
         "Content-Type": "application/json",
       },
       body: "{}",
-      next: { revalidate: SEGUNDOS_CACHE },
+      next: { revalidate: SEGUNDOS_CACHE, tags: [ETIQUETA_MARCA_CASA] },
     })
     if (!r.ok) return null
 

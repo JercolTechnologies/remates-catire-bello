@@ -1309,3 +1309,47 @@ El panel se queda como estaba **a propósito**: esa pantalla la ve el licenciata
 **Lo que NO cierra.** `casa_logo_url` sigue siendo un campo donde hay que **pegar una URL**, y un dueño de remates tiene un PNG en el teléfono. Con la casa ahora dominante, la subida de archivo pasó de detalle a necesaria: Supabase Storage, bucket, política de subida solo para super admin, y un control de archivo en `/admin/super/ajustes`. Queda en PENDIENTES.
 
 **Consecuencias.** No hay prueba de arnés: lo que cambia es qué marca lee una persona en pantalla, y eso se verifica abriendo la pantalla. `tsc --noEmit` sin salida, `eslint` sobre los ocho archivos sin un solo problema, y el build con las rutas intactas.
+
+---
+
+## ADR-050 · Una caché que no se tira cuando deja de ser cierta
+
+**Fecha.** 11 de octubre de 2026 *(solo frontend, sin migración)*
+
+**Contexto.** El mismo día del ADR-049, el primer licenciatario puso el nombre de su casa en `/admin/super/ajustes`, guardó— y la portada siguió diciendo el nombre de la plataforma. Pasados los cinco minutos, igual.
+
+**El diagnóstico, con la medida que lo cerró.** No hizo falta preguntar nada: se comparó el HTML servido por dos rutas de la misma instalación.
+
+| Ruta | Tipo | `<title>` |
+|---|---|---|
+| `/` | estática | `Remate Catire Bello` |
+| `/panel` | **dinámica** | **`Remate VJSS`** |
+
+Una ruta dinámica se renderiza en cada petición, así que ya leía el valor nuevo. **El código del ADR-049 estaba desplegado y funcionaba.** Lo que fallaba era la caché.
+
+Antes de eso se verificó la cadena entera contra la base local: `ajustes_publicos()` devolvía `casa_nombre`, y el mismo `POST` que hace `lib/marcaCasa.ts` contra PostgREST respondía **200** con el valor. Descartar la base y el camino HTTP primero es lo que dejó una sola causa posible.
+
+**La causa, que es una decisión mía.** `lib/marcaCasa.ts` lee con `next: { revalidate: 300 }`. Eso mantiene las 30 rutas estáticas y evita una consulta por visita — y estaba orgulloso de haberlo medido en el build. El precio que no pesé: las páginas se prerrenderizan **en el build**, cuando `casa_nombre` aún estaba vacío, y *stale-while-revalidate* significa que la primera petición pasada la caducidad sirve **la copia vieja** y regenera por detrás. Con un CDN delante, ni eso.
+
+**Y no es un caso raro: poner el nombre de la casa es LO PRIMERO que hace un licenciatario después de fundar.** Le habría pasado a todos, el primer día, con la pantalla que peor impresión deja.
+
+**Decisión: no quitar la caché — tirarla en el momento exacto en que deja de ser cierta.**
+
+Quitarla convertiría el sitio en dinámico y pagaría una consulta por visita, en todas las casas, para siempre, por un dato que cambia una vez en la vida. La ruta `POST /api/marca/revalidar` la invalida al guardar.
+
+**Hacen falta las dos llamadas, y hacen cosas distintas:**
+
+- `revalidateTag(…, { expire: 0 })` tira el dato cacheado del `fetch`. Sin esto la página se vuelve a pintar **con el valor viejo**, que sigue fresco en la caché de datos sus 300 segundos.
+- `revalidatePath('/', 'layout')` tira el HTML ya generado de todo lo que cuelga del layout raíz — que es todo, porque la marca vive ahí.
+
+**`{ expire: 0 }` y no el perfil `'max'` recomendado.** La documentación de Next 16 es explícita: con `'max'` se sigue sirviendo contenido viejo mientras regenera, y con `{ expire: 0 }` *«stale content is never served, so the next request is a blocking revalidate»*. Aquí eso es lo correcto: el dueño acaba de guardar y tiene que verlo, no «dentro de un rato». Unos milisegundos en la siguiente visita es el precio exacto.
+
+**`updateTag`, que sería lo natural, no sirve**: la documentación dice que solo existe dentro de un Server Action, y esto es un Route Handler. Y la forma de un solo argumento de `revalidateTag` está **deprecada** en Next 16 — el `tsc` lo cantó con un `TS2554` antes de desplegar nada.
+
+**La ruta comprueba quién llama.** Sin eso, cualquiera podría pedir revalidaciones en bucle y obligar a regenerar sin parar. No es un agujero de datos, es uno de gasto. Mismo patrón que `/api/notify/recarga`: sesión por cookie y perfil desde la base.
+
+**Si la llamada falla, no se rompe el guardado.** Lo que se pierde es la inmediatez, y a los cinco minutos se arregla solo.
+
+**Consecuencias.** `tsc` y `eslint` sin salida; el build mantiene las rutas estáticas y añade `ƒ /api/marca/revalidar`. No hay prueba de arnés: lo que falla aquí es cuándo se ve un cambio en pantalla, y eso se verifica mirando dos rutas de la misma instalación — que es exactamente como se encontró.
+
+**La lección, que ya había salido con el SVG en negativo (ADR-042) y con el camino al registro (ADR-046):** todo lo que mide el build estaba en verde. Lo que estaba mal solo se veía **abriendo la página**.
