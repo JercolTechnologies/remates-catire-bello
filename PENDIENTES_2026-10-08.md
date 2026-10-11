@@ -1,11 +1,11 @@
 # Pendientes — al 8 de octubre de 2026
 
 Sustituye a `PENDIENTES_2026-10-07.md`, que queda como histórico. Lo cerrado no se
-detalla aquí: está en `ADR.md` (45 decisiones) y en el arnés.
+detalla aquí: está en `ADR.md` (46 decisiones) y en el arnés.
 
 **Estado del proyecto:** 73/73 en `tests/pruebas_dinero.sql`, 4/4 en
 `tests/concurrencia.sql`, 30 en `tests/fechas.mjs`, 33 en `tests/log.mjs`,
-31 en `tests/aviso_puja.mjs`. 45 migraciones, 45 ADRs.
+31 en `tests/aviso_puja.mjs`. 45 migraciones, 46 ADRs.
 
 ---
 
@@ -38,6 +38,7 @@ detalla aquí: está en `ADR.md` (45 decisiones) y en el arnés.
 | **Corregido el instalador**: decía «dos variables» y son **diez**; la comprobación que daba no encontraba las de correo | `INSTALACION_LICENCIATARIO.md` |
 | **`fundar_super_admin`**: el licenciatario funda su propia casa; Jercol deja de entrar a la base del cliente | ADR-045, `20261010193000`, P73 → **cierra el 5.3** |
 | **`AvisoFundar`**: una instalación nueva ya sabe decirle a su dueño cómo empezar | ADR-045 |
+| **El fundador ya encuentra el registro**: `/admin/login` enlaza a `/register` cuando la casa no tiene dueño — bloqueó la primera instalación real | ADR-046 |
 
 ---
 
@@ -108,6 +109,15 @@ WhatsApp y Telegram**; y `NOTIFY_EMAIL_TO` como lista desde los ajustes de insta
 ## 4 · Interfaz
 
 Lo de la navegación y los anchos se cerró el 09/10 (ADR-040). Queda:
+
+- **`Invalid login credentials` se muestra crudo en `/admin/login`.** Es el texto de
+  Supabase y suena a contraseña mal escrita, pero en una casa sin fundar lo que pasa
+  es que **no hay cuenta**: `auth.users` está vacía. Eso bloqueó la primera
+  instalación real el 11/10 (ADR-046). El enlace al registro ya está puesto, así que
+  el camino existe; lo que queda es el mensaje. Y no es gratis: traducirlo en el
+  frontend pone en pantalla texto que decide la base (ADR-015). La salida limpia sería
+  distinguir en el cliente el caso «no hay sesión y la casa no está fundada» antes de
+  repetir el error de Supabase.
 
 - **Un intercambio de números correcto se ve igual que uno que no hizo nada.**
   Al guardar, la pantalla recarga los caballos con `.order("numero")`, así que la

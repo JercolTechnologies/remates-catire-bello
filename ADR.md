@@ -1172,3 +1172,25 @@ Jercol **sigue** escribiendo una fila en la base del cliente. Pero lo hace **al 
 **El código y el nombre se piden al fundar, no después.** Cada acción del panel queda firmada con ellos en la bitácora (ADR-027). Pedirlos aquí evita estrenar la casa con el mismo defecto que el aviso ámbar de `/admin/super/admins` viene a señalar.
 
 **Consecuencias.** `P73`, siete condiciones. La que da la medida es la sexta: tras fundar, se **cambia** el correo designado al de otra persona y se intenta de nuevo — y se rechaza igual, porque el candado de «ya hay dueño» manda sobre el del correo. Y la octava: `anon` puede preguntar si la casa está fundada, pero no fundarla.
+
+---
+
+## ADR-046 · El camino existía, y por eso nadie lo encontró
+
+**Fecha.** 11 de octubre de 2026 *(solo frontend, sin migración)*
+
+**Contexto.** La primera instalación real se entregó el 10/10 y se bloqueó en el primer minuto. El designado abrió la portada, vio la franja ámbar de `AvisoFundar` (ADR-045), pulsó **Fundar la casa**, escribió su correo y una contraseña, y recibió **`Invalid login credentials`**.
+
+**El diagnóstico, y por qué importó el orden.** La hipótesis de cabecera era la confirmación de correo de Supabase: con *Confirm email* en ON, un usuario sin confirmar recibe ese mismo texto genérico. `select email, email_confirmed_at from auth.users` devolvió **cero filas**, lo que la descarta: no hay usuario que confirmar.
+
+Y el mismo hecho que pareció un síntoma resultó ser la prueba que cerró el caso. `AvisoFundar` **solo pinta con `casa_fundada() === false`**; si la RPC falla hace `setFundada(true)` y no pinta nada. Que la franja se viera demuestra que la aplicación **sí hablaba con la base de la licencia** —y que no era producción, que ya está fundada y devolvería `true`—. Variables de Vercel, redeploy y conexión: correctos. Quedaba una sola causa posible: **la cuenta nunca se creó**.
+
+**La causa.** `/admin/login` en fase `entrar` hace `signInWithPassword` y nada más. No registra, y no enlazaba al registro. En una casa recién instalada **la cuenta del fundador no existe todavía, por definición** — `auth.users` está vacía. La franja decía «regístrate con el correo designado y entra por aquí», y el botón llevaba a una pantalla que exige lo que aún no existe.
+
+**Lo que hace esto un defecto de diseño y no un olvido:** el camino al registro **sí existía**. `/admin/login` → enlace «Login normal» → `/login` → «Crear cuenta» → `/register`. Tres saltos, el primero detrás de un enlace rotulado **«Login normal»**, que nadie lee como «regístrate aquí». Un camino que existe y no se encuentra no es un camino: es un acertijo. Y no lo detectó ninguna prueba porque **el arnés prueba la base, no lo que una persona alcanza a leer en pantalla** — la misma lección que dejó el SVG en negativo (ADR-042): hubo que *mirarlo*.
+
+**Decisión.** Enlace explícito a `/register` dentro del aviso ámbar de `/admin/login`, condicionado a `fundada === false`. En una casa con dueño ese aviso no se pinta, y mandar administradores al registro sería un error distinto.
+
+**Lo que NO se tocó, y por qué.** El mensaje crudo de Supabase sigue mostrándose. `Invalid login credentials` suena a contraseña mal escrita cuando lo que pasa es que no hay cuenta, pero traducirlo aquí pondría texto de la base en el frontend (ADR-015) y es una decisión aparte. Queda anotado en PENDIENTES.
+
+**Consecuencias.** No hay prueba de arnés que cubra esto: lo que falla es la ruta que una persona encuentra, y eso se verifica abriendo la pantalla. `tsc --noEmit` y `eslint` en verde.

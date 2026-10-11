@@ -152,6 +152,30 @@ export default function AdminLoginPage() {
               <div className="mt-4 rounded-xl bg-amber-500/10 p-3 text-xs leading-snug text-amber-200 ring-1 ring-amber-500/20">
                 Esta casa todavía no tiene dueño. Entra con el correo designado al instalarla y
                 te pediremos los datos para fundarla.
+                {/* EL DEFECTO QUE ARREGLA (11/10/2026)
+
+                    En una casa recien instalada la cuenta del fundador NO EXISTE
+                    todavia: `auth.users` esta vacio. Esta pantalla solo sabe hacer
+                    signInWithPassword, asi que el designado escribia el correo que le
+                    dieron y recibia "Invalid login credentials" -- el texto menos
+                    informativo posible, porque suena a contrasena mal escrita cuando
+                    en realidad no hay cuenta ninguna.
+
+                    El camino al registro SI existia: este login -> enlace "Login
+                    normal" -> /login -> "Crear cuenta" -> /register. Tres saltos
+                    detras de un enlace rotulado "Login normal" no es un camino, es un
+                    acertijo. Medido en la primera instalacion real (11/10/2026): se
+                    quedo bloqueado exactamente aqui.
+
+                    Solo se pinta con `fundada === false`. En una casa con dueno este
+                    aviso no existe, y mandar admins al registro seria un error. */}
+                <div className="mt-2">
+                  ¿Todavía no tienes cuenta?{" "}
+                  <Link href="/register" className="font-semibold underline underline-offset-4">
+                    Créala con el correo designado
+                  </Link>
+                  , y vuelve aquí a fundar.
+                </div>
               </div>
             ) : null}
 
