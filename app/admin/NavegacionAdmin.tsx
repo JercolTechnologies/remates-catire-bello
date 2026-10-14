@@ -201,6 +201,13 @@ export default function NavegacionAdmin() {
         <div className="border-b border-zinc-800 px-4 py-4">{Marca}</div>
         <div className="flex-1 overflow-y-auto px-2 py-4">{Enlaces}</div>
         <div className="border-t border-zinc-800 p-2">
+          {/* La guia la necesita CUALQUIER administrador, no solo el dueno,
+              asi que vive aqui abajo con los enlaces de contexto y no dentro
+              del grupo de super admin. */}
+          <Link href="/admin/ayuda"
+                className="block rounded-xl px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100">
+            Guía de uso
+          </Link>
           <Link href="/remates"
                 className="block rounded-xl px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200">
             Ver la app como un jugador

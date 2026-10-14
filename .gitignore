@@ -55,3 +55,9 @@ supabase/.branches/
 respaldo_*.sql
 backup_*.sql
 *.dump
+
+# El PDF de la guia es un ARTEFACTO: lo genera herramientas/guia_pdf.py
+# a partir de docs/GUIA_LICENCIATARIO.md, que es la unica fuente del texto.
+# Versionarlo dejaria dos copias de la misma guia, y la del PDF se quedaria
+# vieja en cuanto alguien corrigiera el documento.
+docs/*.pdf
