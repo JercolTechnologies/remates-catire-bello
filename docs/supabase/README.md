@@ -5,6 +5,13 @@
 | `COMO_APLICAR.md` | **Empieza aquí.** Cómo se aplican las migraciones, local y producción, y la trampa del `migration repair` |
 | `COMO_HACER_EL_BASELINE.md` | Cómo se generó el volcado inicial y qué verificar si hay que rehacerlo |
 | `INSTALACION_LICENCIATARIO.md` | Dar de alta una instalación nueva, incluido el único paso manual: fundar su primer super admin |
+| `reset_instalacion_nueva.sql` | **Devolver al estado de instalación nueva un proyecto que ya se usó** (usuarios, dinero, marca y correo del fundador), sin reaplicar migraciones |
+
+> `reset_instalacion_nueva.sql` no es una migración y por eso no vive en
+> `supabase/migrations/`: ahí el CLI lo aplicaría en cada `db push`. Se corre a
+> mano, una vez, en el SQL Editor del proyecto que se va a reutilizar —nunca en
+> producción— y **conserva `supabase_migrations.schema_migrations`**, así que
+> después del reset `db push` no reaplica nada ni hay que rehacer el baseline.
 
 ## Reglas de `supabase/migrations/`
 
