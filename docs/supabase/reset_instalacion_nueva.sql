@@ -1,4 +1,4 @@
--- =============================================================================
+-- -----------------------------------------------------------------------------
 --  reset_instalacion_nueva.sql
 --
 --  QUE HACE
@@ -46,7 +46,7 @@
 --
 --  El bloque 0, y nada mas. Si se olvida, el script SE NIEGA a borrar: el
 --  correo de ejemplo lo detiene.
--- =============================================================================
+-- -----------------------------------------------------------------------------
 
 -- -----------------------------------------------------------------------------
 --  ANTES DE NADA: ESTE ES EL PROYECTO QUE CREES?
@@ -335,7 +335,7 @@ select 'claves de ajustes (se conservan)',
 
 commit;
 
--- =============================================================================
+-- -----------------------------------------------------------------------------
 --  DESPUES DE CORRERLO
 --
 --  1. El licenciatario se registra en /register con el correo de _reset_cfg.
@@ -359,4 +359,4 @@ commit;
 --  Si el proyecto se queda para otro cliente, cambia tambien en SU despliegue
 --  de Vercel el NEXT_PUBLIC_SUPABASE_URL / ANON_KEY, el SMTP y el APP_URL.
 --  Este script no toca nada de eso: no vive en la base.
--- =============================================================================
+-- -----------------------------------------------------------------------------
