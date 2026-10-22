@@ -108,6 +108,15 @@ declare
   v_usuarios integer;
   v_faltan   text;
 begin
+  -- Si alguien corre solo el bloque de guardas -- porque selecciono un trozo,
+  -- o porque el editor ejecuta desde el cursor -- el error nativo es
+  -- `relation "_reset_cfg" does not exist`, que no explica nada. Este si: la
+  -- tabla es TEMPORAL y nace y muere con esta transaccion, asi que el bloque 0
+  -- tiene que ir en la misma corrida que el resto.
+  if to_regclass('pg_temp._reset_cfg') is null then
+    raise exception 'No existe _reset_cfg: falta el bloque 0. Corre el archivo COMPLETO (Ctrl+A y Run), no solo una parte: la tabla de configuracion es temporal y solo vive dentro de esta transaccion.';
+  end if;
+
   select correo_fundador, dinero_de_prueba
     into v_correo, v_flag
   from _reset_cfg;
