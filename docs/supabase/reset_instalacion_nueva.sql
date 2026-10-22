@@ -309,11 +309,20 @@ end $$;
 select 'usuarios en auth.users' as que,
        (select count(*)::text from auth.users) as valor
 union all
+select 'dinero en carteras',
+       (select round(coalesce(sum(saldo_disponible + saldo_bloqueado), 0), 2)::text
+          from public.wallets)
+union all
 select 'casa_fundada()',
        public.casa_fundada()::text
 union all
 select 'correo_fundador',
        (select valor from public.ajustes_instalacion where clave = 'correo_fundador')
+union all
+select 'nombre de la casa',
+       coalesce(
+         (select nullif(btrim(valor), '') from public.ajustes_instalacion where clave = 'casa_nombre'),
+         '(vacio: se pinta la marca de la plataforma)')
 union all
 select 'minimos (incremento / salida / % retiro)',
        (select string_agg(valor, ' / ' order by clave)
