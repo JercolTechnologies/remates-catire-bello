@@ -150,6 +150,13 @@ Al 10/10/2026 la lista completa es: `NEXT_PUBLIC_SUPABASE_URL`,
 `VERCEL_PROJECT_PRODUCTION_URL`, `SMTP_USER`, `SMTP_PASS`, `NOTIFY_EMAIL_TO`,
 `SMTP_HOST`, `SMTP_PORT`, `APP_URL`.
 
+> **Las dos de la licencia (24/10/2026, ADR-053).** `LICENCIA_SUSPENDIDA` y
+> `LICENCIA_AVISO` no se configuran al instalar: nacen ausentes, y ausente
+> significa licencia activa. Son el interruptor que cierra la instalación si la
+> casa deja de pagar. Ver `docs/LICENCIA_SUSPENSION.md`. **Si esa casa no es
+> tuya, no las pongas** — y si el proyecto de Vercel sí es suyo, no te sirven de
+> nada: el dueño las cambia y redespliega.
+
 > **Las variables NO van al repositorio.** `.gitignore` incluye `.env*`, así
 > que ningún `.env` viaja a GitHub ni a ningún despliegue. El `.env.local` de
 > tu máquina apunta a **tu** producción y no tiene nada que ver con la

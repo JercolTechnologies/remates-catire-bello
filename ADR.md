@@ -1426,3 +1426,37 @@ Ninguna de las dos cosas se veía en el código. Se vieron pintándolas.
 **Lo que NO hizo falta, y casi hago.** Para el «quejas, reclamos y sugerencias» iba a crear una clave `casa_correo_contacto`— y **`support_settings` ya existía**, con su pantalla en `/admin/super/soporte` y su página en `/contactanos`, ya enlazada desde el menú del jugador y con los enlaces activos (el pendiente que decía lo contrario estaba obsoleto). Una segunda fuente para el mismo dato habría sido el defecto, no el arreglo. Lo que faltaba era **texto**: `/contactanos` decía «escríbenos» sin decir quién es «nos» — que en una casa licenciada se lee como la plataforma, y es justo al revés. Ahora nombra a la casa y dice que **ella** recibe los depósitos, paga los retiros y responde por los reclamos. Y el pie enlaza ahí, **antes** que a nosotros: el jugador que baja al pie suele venir con un problema.
 
 **Consecuencias.** `P76`, seis condiciones, incluidas las dos que vigilan los agujeros: que las cuatro políticas filtren por su bucket y que no se acepte SVG. Arnés **76/76**. Migración aplicada en producción. De paso cayó un `any` que llevaba tiempo en `/contactanos`.
+
+---
+
+## ADR-053 · Un interruptor que cierra la puerta sin tocar la caja
+
+**Fecha.** 24 de octubre de 2026
+
+**Contexto.** La pregunta fue de negocio, no de código: *¿qué pasa cuando un licenciatario deja de pagar?* La respuesta honesta era **nada**. Se buscó en todo el repositorio: ninguna comprobación de licencia, ninguna caducidad, ninguna llamada a un servidor de la plataforma. Y no era un olvido — el **ADR-045** había ido en dirección contraria a propósito, retirando al proveedor la capacidad de entrar a la base del cliente.
+
+Las palancas que había eran todas de infraestructura, y todas malas:
+
+- **Pausar el proyecto de Supabase.** Corta todo, sí. Y también congela los retiros de los jugadores: se convierte un impago en un problema de terceros.
+- **Borrar el despliegue o quitar el dominio.** Público y visible, pero deja la casa sin puerta y sin explicación.
+- **Rotar la llave anónima.** Rompe el sitio y no se arregla sin nosotros, que es exactamente el secuestro que el ADR-045 evita.
+
+Faltaba lo obvio: un corte que se vea, se explique y se pueda deshacer.
+
+**Decisión 1: el interruptor vive en el despliegue, no en la base.** `LICENCIA_SUSPENDIDA` (y `LICENCIA_AVISO`, para el texto) se leen del proceso en `lib/licencia.ts`. Dos razones, y la primera es la que decide:
+
+- **No puede vivir dentro de lo que quizá hay que apagar.** Si el corte se cobra con el proyecto de Supabase pausado o roto, una bandera guardada en `ajustes_instalacion` no se puede leer justo cuando hace falta. Una variable de entorno no hace red.
+- **Es de la plataforma.** La tabla de ajustes la escribe el super admin de la casa por RPC (ADR-047). Una clave de licencia ahí sería una clave que el licenciatario devuelve a «activa» desde su propio panel.
+
+**Decisión 2: sustituye la aplicación, no la tapa.** El corte está en `app/layout.tsx`, **antes** de leer la casa y antes de montar `ProveedorMarcaCasa`, `RematesEnVivo` y `SesionCliente`: si la licencia está suspendida se devuelve el árbol mínimo con `AvisoSuspension` y nada más. Es el ADR-026 llevado a su conclusión: un aviso que se puede esquivar no es un aviso, así que no hay ninguna pantalla del producto que se pueda colar por debajo —tampoco `/admin/login`, que es donde el dueño se entera.
+
+Y por eso la pantalla **no consulta la base**: no pinta el nombre de la casa a propósito. Tiene que salir aunque Supabase no conteste, que es el escenario en el que más se va a usar.
+
+**Decisión 3: si la variable no está, la licencia está activa.** El interruptor falla hacia abierto. Un dedo torcido al escribirlo no puede dejar a un cliente que paga con la web en blanco; un corte que no se aplica, en cambio, se nota inmediatamente. Se aceptan `1`, `true`, `si`, `sí` y `suspendida` porque escribir mal esto no debe activar nada.
+
+**Lo que se le dice al jugador, que es el que no debe nada.** La pantalla tiene tres párrafos: el hecho, a quién escribir, y —el que importa— que **la plataforma no tiene su dinero y la casa sí responde por su saldo**, y que no se ha borrado nada. Sin eso, el jugador que se encuentra la puerta cerrada concluye que le estafamos nosotros.
+
+**Qué NO es esto, dicho sin adornos.** `PRODUCTO.md` y `docs/LICENCIA_SUSPENSION.md` lo repiten para que nadie se confíe: el navegador habla con Supabase directamente, así que **esto cierra la puerta, no la caja fuerte**. Quien tenga la llave anónima sigue llegando a la API REST. Contra un licenciatario que está vaciando la caja, la herramienta es pausar Supabase y asumir el coste; contra el que simplemente no pagó, es esta pantalla — y una carta con fecha antes de pulsarla.
+
+**Consecuencias.** Cero migraciones y cero cambios en la base: es código y dos variables. El coste está en el redespliegue —las páginas son estáticas y la variable se lee al construir, así que el corte tarda un minuto en verse y hay que acordarse de desplegar—, y está aceptado a cambio de que el interruptor no dependa de la red. La página se marca `noindex` para no envenenar un dominio que con suerte vuelve a abrirse mañana. Quedan anotados, sin hacer: la bandera en base para suspender sin desplegar, el modo degradado que corta lo nuevo pero deja retirar, y el bloqueo de solo `/admin`. Ninguno se implementó porque hoy la prioridad es que el corte sea **reversible y visible**, no que sea infranqueable.
+

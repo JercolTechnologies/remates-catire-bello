@@ -4,12 +4,14 @@ import "./globals.css";
 import Link from "next/link";
 import AvisosDelUsuario from "./components/AvisosDelUsuario";
 import AvisoFundar from "./components/AvisoFundar";
+import AvisoSuspension from "./components/AvisoSuspension";
 import CabeceraCliente from "./components/CabeceraCliente";
 import NavegacionCliente from "./components/NavegacionCliente";
 import { RematesEnVivo } from "./components/RematesEnVivo";
 import { SesionCliente } from "./components/SesionCliente";
 import { pieDePagina, tituloDocumento, enlaceContacto, ICONOS, PLATAFORMA } from "@/lib/marca";
 import { casaDeLaInstalacion } from "@/lib/marcaCasa";
+import { estadoDeLicencia } from "@/lib/licencia";
 import { ProveedorMarcaCasa } from "./components/MarcaCasa";
 
 const geistSans = Geist({
@@ -40,6 +42,20 @@ const DESCRIPCION =
 // puede leerla. La lectura esta cacheada cinco minutos (lib/marcaCasa.ts), asi
 // que esto no convierte cada visita en una consulta.
 export async function generateMetadata(): Promise<Metadata> {
+  // LA LICENCIA MANDA SOBRE TODO LO DEMAS (ADR-053). Si la instalacion esta
+  // suspendida no se consulta la casa: la pestana tiene que decir que esta
+  // cerrada, no el nombre de un remate que ya no esta operando. Y `noindex`
+  // evita que el buscador guarde la pantalla de suspension como contenido de
+  // un dominio que, con suerte, manana vuelve a estar abierto.
+  const licencia = estadoDeLicencia();
+  if (licencia.suspendida) {
+    return {
+      title: "Servicio suspendido",
+      description: "El acceso a esta instalación está temporalmente cerrado.",
+      robots: { index: false, follow: false },
+    };
+  }
+
   const casa = await casaDeLaInstalacion();
   const titulo = tituloDocumento(casa);
 
@@ -81,6 +97,23 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // EL INTERRUPTOR (ADR-053). Va lo PRIMERO, antes de leer la casa y antes de
+  // montar proveedores: si la licencia esta suspendida no se consulta la base,
+  // no se abre el canal de remates y no se pinta ninguna pantalla del producto
+  // -- ni `/admin/login`. La pantalla de suspension ES la aplicacion entera.
+  const licencia = estadoDeLicencia();
+  if (licencia.suspendida) {
+    return (
+      <html lang="es">
+        <body
+          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        >
+          <AvisoSuspension aviso={licencia.aviso} />
+        </body>
+      </html>
+    );
+  }
+
   // Una sola lectura para toda la aplicacion: el titulo de arriba, el pie de
   // abajo y las cabeceras de cliente y de admin salen de aqui. Cacheada.
   const casa = await casaDeLaInstalacion();
